@@ -35,3 +35,30 @@ build/
 dist/
 *.egg-info/
 .cache/
+
+# ── Added for NovaMind AI multimodal upgrade ──────────────────
+# Uploaded files (never commit user uploads)
+uploads/
+tmp/
+*.tmp
+
+# Secrets / credentials (belt-and-suspenders — .env is already above)
+secrets.json
+credentials.json
+aws_credentials
+
+# LangSmith / LangChain traces
+langchain.log
+
+# Streamlit runtime files
+.streamlit/secrets.toml
+
+# Test artefacts
+tests/__pycache__/
+tests/*.pyc
+
+# PDF course material (large binary — not needed in repo)
+*.pdf
+
+# macOS extended attributes
+._*

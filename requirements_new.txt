@@ -1,0 +1,69 @@
+# ============================================================
+# requirements_new.txt — NovaMind AI Multimodal Chatbot
+# ============================================================
+# Clean, pinned requirements for the upgraded multimodal project.
+#
+# Install in your virtual environment:
+#   [PowerShell]
+#   .\.venv\Scripts\Activate.ps1
+#   pip install -r requirements_new.txt
+#
+# These versions are compatible with Python 3.9 – 3.14.
+# Pinned to minor versions for reproducibility; patch updates
+# are generally safe.
+# ============================================================
+
+
+# ── AWS SDK ──────────────────────────────────────────────────
+# boto3 is the AWS SDK — used for Bedrock, STS, and S3 calls.
+# botocore is boto3's low-level foundation (installed automatically).
+boto3>=1.34.0
+botocore>=1.34.0
+
+
+# ── LangChain (retained from original project) ───────────────
+# The original chatbot_backend.py uses LangChain. Kept so that
+# chatbot_frontend.py and chatbot_frontend2.py continue to work.
+langchain>=0.3.0
+langchain-aws>=1.0.0
+langchain-core>=0.3.0
+langchain-community>=0.3.0
+
+
+# ── Streamlit ─────────────────────────────────────────────────
+# Web UI framework. 1.35+ required for st.chat_message avatars
+# and st.file_uploader type filtering.
+streamlit>=1.35.0
+
+
+# ── Image processing ─────────────────────────────────────────
+# Pillow is used by ImageService for:
+#   - EXIF orientation correction
+#   - RGBA → RGB conversion for JPEG compatibility
+#   - Thumbnail generation for sidebar preview
+Pillow>=10.0.0
+
+
+# ── PDF processing ────────────────────────────────────────────
+# pypdf is used by DocumentService for:
+#   - Page count extraction
+#   - Text preview extraction (first 3 pages shown in sidebar)
+# Optional — the app works without it but PDFs show no preview.
+pypdf>=4.0.0
+
+
+# ── Environment variable management ──────────────────────────
+# python-dotenv loads .env files for local development.
+# In production (EC2 with IAM role), no .env file is needed.
+python-dotenv>=1.0.0
+
+
+# ── Utilities (standard, likely already present) ─────────────
+# requests is used by Streamlit internally.
+requests>=2.31.0
+
+
+# ── Optional: YAML support ───────────────────────────────────
+# PyYAML was in the original requirements — retained for
+# compatibility with any LangChain YAML prompt templates.
+PyYAML>=6.0.0
