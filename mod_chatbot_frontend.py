@@ -165,13 +165,13 @@ def _inject_css() -> None:
         .nm-hero {
             background: linear-gradient(135deg, #0d1b2a 0%, #1f3a5f 40%, #1f6feb 100%);
             border: 1px solid #1f6feb;
-            border-radius: 16px; padding: 1.2rem 1.8rem; margin-bottom: 1.2rem;
+            border-radius: 16px; padding: 1.4rem 2rem; margin-top: 1rem; margin-bottom: 1.2rem;
             color: white;
             box-shadow: 0 4px 32px rgba(31,111,235,0.3), 0 0 0 1px rgba(88,166,255,0.15);
         }
-        .nm-hero h1 { margin: 0 0 0.25rem 0; font-size: 1.7rem; font-weight: 800;
-                      letter-spacing: -0.3px; }
-        .nm-hero p  { margin: 0; opacity: 0.85; font-size: 0.9rem; }
+        .nm-hero h1 { margin: 0 0 0.35rem 0; font-size: 1.8rem; font-weight: 900;
+                      letter-spacing: -0.5px; }
+        .nm-hero p  { margin: 0; font-size: 0.92rem; font-weight: 600; opacity: 0.92; }
 
         /* ── Token counter card ── */
         .nm-token-card {
@@ -317,6 +317,9 @@ def _render_login_page() -> None:
         overflow: hidden;
         animation: logoGlow 3s ease-in-out infinite;
         margin-bottom: 1.2rem;
+        max-width: 55%;
+        margin-left: auto;
+        margin-right: auto;
     }
     .nm-logo-wrap img { width: 100%; border-radius: 20px; display: block; }
     /* Info card */
@@ -1334,17 +1337,23 @@ def main() -> None:
     model_label = st.session_state.selected_model_label.split("(")[0].strip()
 
     if pending_img:
-        sub = (f"🖼️ <span style='color:#3fb950;font-weight:600;'>Image attached:</span> "
-               f"<span style='color:#c9d1d9;'>{pending_img.file_name}</span> — type your question below.")
+        sub = (f"🖼️ <span style='color:#3fb950;font-weight:700;'>Image attached:</span> "
+               f"<span style='color:#e6edf3;font-weight:600;'>{pending_img.file_name}</span>"
+               f" — type your question below.")
     elif pending_doc:
-        sub = (f"📄 <span style='color:#d29922;font-weight:600;'>Document attached:</span> "
-               f"<span style='color:#c9d1d9;'>{pending_doc.file_name}</span> — type your question below.")
+        sub = (f"📄 <span style='color:#d29922;font-weight:700;'>Document attached:</span> "
+               f"<span style='color:#e6edf3;font-weight:600;'>{pending_doc.file_name}</span>"
+               f" — type your question below.")
     else:
-        sub = (f"<span style='opacity:0.75;'>{model_label}</span>"
-               f" &nbsp;·&nbsp; <span style='opacity:0.75;'>{st.session_state.selected_language}</span>"
-               f" &nbsp;·&nbsp; <span style='opacity:0.75;'>AWS Bedrock</span>"
-               f" &nbsp;·&nbsp; <span style='opacity:0.6;font-size:0.82rem;'>"
-               f"👤 {st.session_state.login_user}</span>")
+        sub = (
+            f"<span style='font-weight:600;opacity:0.9;'>🧠 {model_label}</span>"
+            f"&nbsp;&nbsp;·&nbsp;&nbsp;"
+            f"<span style='font-weight:600;opacity:0.9;'>🌐 {st.session_state.selected_language}</span>"
+            f"&nbsp;&nbsp;·&nbsp;&nbsp;"
+            f"<span style='font-weight:600;opacity:0.9;'>☁️ AWS Bedrock</span>"
+            f"&nbsp;&nbsp;·&nbsp;&nbsp;"
+            f"<span style='font-weight:600;opacity:0.8;'>👤 {st.session_state.login_user}</span>"
+        )
 
     st.markdown(
         f"""<div class="nm-hero">
