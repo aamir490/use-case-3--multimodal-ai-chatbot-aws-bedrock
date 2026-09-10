@@ -127,13 +127,21 @@ LANGUAGE_OPTIONS: dict[str, str] = {
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _load_logo_bytes() -> bytes | None:
-    """Load logo as bytes — reliable across all OS/working-directory combinations."""
-    logo_path = ROOT / "novamind_ai_logo.jpg"
-    if logo_path.exists():
-        try:
-            return logo_path.read_bytes()
-        except Exception:
-            return None
+    """
+    Load logo as bytes. Tries multiple path strategies so it works on both
+    Windows (local dev) and Linux (EC2), regardless of working directory.
+    """
+    candidates = [
+        ROOT / "novamind_ai_logo.jpg",                          # relative to script
+        Path(__file__).resolve().parent / "novamind_ai_logo.jpg",  # absolute from script
+        Path.cwd() / "novamind_ai_logo.jpg",                    # cwd fallback
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                return p.read_bytes()
+            except Exception:
+                continue
     return None
 
 
@@ -712,19 +720,10 @@ def _render_sidebar() -> None:
         # ── Logo + title ──────────────────────────────────────────────────────
         logo_bytes = _load_logo_bytes()
         if logo_bytes:
-            import base64
-            b64 = base64.b64encode(logo_bytes).decode()
-            st.markdown(
-                f'<div style="border-radius:14px; overflow:hidden; margin-bottom:0.8rem;'
-                f'box-shadow:0 0 18px rgba(31,111,235,0.4);">'
-                f'<img src="data:image/jpeg;base64,{b64}" '
-                f'style="width:100%;display:block;" alt="NovaMind AI"/>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+            st.image(logo_bytes, use_container_width=True)
         else:
             st.markdown(
-                '<div style="text-align:center;font-size:3rem;margin-bottom:0.5rem;'
+                '<div style="text-align:center;font-size:3rem;margin-bottom:0.4rem;'
                 'filter:drop-shadow(0 0 12px #1f6feb);">🤖</div>',
                 unsafe_allow_html=True,
             )
@@ -732,9 +731,14 @@ def _render_sidebar() -> None:
         st.markdown("## 🤖 NovaMind AI")
         st.markdown("*Multimodal assistant — Amazon Bedrock*")
         st.markdown(
-            '<p style="font-size:0.78rem; color:#8b949e; margin-top:-6px;">'
-            f'👨‍💻 Built by <strong style="color:#58a6ff;">Aamir</strong> &nbsp;|&nbsp;'
-            f'👤 <span style="color:#58a6ff;">{st.session_state.login_user}</span></p>',
+            '<div style="margin-top:4px; margin-bottom:2px; padding:6px 0 4px 0;'
+            'border-top:1px solid #21262d; border-bottom:1px solid #21262d;">'
+            '<span style="font-size:0.82rem; font-weight:700; color:#c9d1d9;">'
+            '👨‍💻 Built by <span style="color:#58a6ff;">Aamir</span>'
+            ' &nbsp;·&nbsp; AWS Generative AI Engineer</span><br>'
+            f'<span style="font-size:0.72rem; color:#6e7681;">'
+            f'👤 Signed in as <strong style="color:#58a6ff;">{st.session_state.login_user}</strong>'
+            f'</span></div>',
             unsafe_allow_html=True,
         )
 

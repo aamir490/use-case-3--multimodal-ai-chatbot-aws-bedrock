@@ -133,6 +133,7 @@ With an IAM role, no `aws configure` is needed on the EC2 instance.
 ```powershell
 # [PowerShell — run from folder where .pem file is located]
 ssh -i "mlops-key.pem" ubuntu@<your-ec2-public-ip>
+ssh -i "mlops-key.pem" ubuntu@3.80.226.238
 ```
 
 ### Step 4: Set up the server
@@ -166,6 +167,12 @@ pip install -r requirements_new.txt
 
 ```bash
 # [EC2 — Ubuntu]
+sudo apt install awscli -y 
+
+aws configure
+
+aws sts get-caller-identity
+
 python scripts/bedrock_model_access_check.py
 ```
 
@@ -178,6 +185,17 @@ nohup streamlit run mod_chatbot_frontend.py \
   --server.address 0.0.0.0 \
   > nohup.out 2>&1 &
 ```
+
+```bash
+# or 
+nohup streamlit run mod_chatbot_frontend.py --server.port 8501 --server.address 0.0.0.0 > nohup.out 2>&1 &
+
+# Access the app in your browser: http://<your-ec2-public-ip>:8501
+
+# Make sure port 8501 is open in your Security Group:
+```
+
+
 
 ### Step 9: Access the app
 
