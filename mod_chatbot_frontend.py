@@ -3,13 +3,17 @@ mod_chatbot_frontend.py
 ────────────────────────
 NovaMind AI — Production-grade multimodal chatbot powered by Amazon Bedrock.
 
-Supports:
-  • Text conversations with full context memory
-  • Image upload & visual analysis (JPEG, PNG, GIF, WebP)
-  • Document upload & Q&A (PDF, TXT, MD, CSV, DOCX, XLSX, HTML)
-  • Streaming responses (token-by-token display)
+Features:
+  • Login page (demo authentication)
+  • Model selector  — Nova Pro / Nova Lite / Claude 3.5 Sonnet
+  • Token & cost counter — live running total per session
+  • Prompt templates — 5 pre-built personas
+  • Conversation summary button
+  • AWS / Bedrock connection health check
+  • Response language selector — 8 languages
+  • Text, image, and document (PDF) multimodal support
+  • Streaming responses (token-by-token)
   • Conversation export as plain text
-  • Configurable model settings via sidebar
 
 Run:
     streamlit run mod_chatbot_frontend.py
@@ -23,8 +27,6 @@ from pathlib import Path
 import streamlit as st
 
 # ── Path setup ────────────────────────────────────────────────────────────────
-# Ensure the project root is on sys.path so services/ and utils/ are importable
-# regardless of the working directory when streamlit is invoked.
 ROOT = Path(__file__).parent.resolve()
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -35,8 +37,6 @@ from services.document_service import DocumentResult, DocumentValidationError
 from services.image_service import ImageResult, ImageValidationError
 from utils.validators import (
     validate_file_upload,
-    is_image_file,
-    is_document_file,
     format_file_size,
     sanitize_filename,
     export_conversation_as_text,
@@ -56,21 +56,83 @@ st.set_page_config(
 )
 
 # ═════════════════════════════════════════════════════════════════════════════
+# CONSTANTS
+# ═════════════════════════════════════════════════════════════════════════════
+
+# ── Demo login credentials (portfolio/demo auth — not production) ─────────────
+# In a real product this would be Amazon Cognito.
+DEMO_USERS: dict[str, str] = {
+    "admin":  "novabot123",
+    "aamir":  "bedrock2026",
+    "demo":   "demo1234",
+}
+
+# ── Bedrock model options ─────────────────────────────────────────────────────
+MODEL_OPTIONS: dict[str, str] = {
+    "Amazon Nova Pro  (Recommended)":    "amazon.nova-pro-v1:0",
+    "Amazon Nova Lite (Fast & Cheap)":   "amazon.nova-lite-v1:0",
+    "Claude 3.5 Sonnet (High Accuracy)": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+}
+
+# ── Token pricing per model (USD per 1 000 tokens) ───────────────────────────
+MODEL_PRICING: dict[str, dict[str, float]] = {
+    "amazon.nova-pro-v1:0":                          {"input": 0.0008,  "output": 0.0032},
+    "amazon.nova-lite-v1:0":                         {"input": 0.00006, "output": 0.00024},
+    "anthropic.claude-3-5-sonnet-20241022-v2:0":     {"input": 0.003,   "output": 0.015},
+}
+
+# ── Prompt templates ──────────────────────────────────────────────────────────
+PROMPT_TEMPLATES: dict[str, str] = {
+    "🤖 Default Assistant": (
+        "You are NovaMind, an intelligent multimodal AI assistant powered by "
+        "Amazon Nova Pro on AWS Bedrock. You can understand and discuss text, "
+        "images, and documents. Be helpful, accurate, and professional."
+    ),
+    "🧑‍💻 Code Reviewer": (
+        "You are an expert software engineer and code reviewer. Analyse code "
+        "for bugs, security issues, performance problems, and style. Suggest "
+        "clear improvements with examples. Be precise and technical."
+    ),
+    "📊 Data Analyst": (
+        "You are a senior data analyst. Help interpret data, explain charts, "
+        "analyse spreadsheets, and provide statistical insights. Use clear "
+        "language and back every claim with reasoning."
+    ),
+    "📝 Document Summariser": (
+        "You are an expert at summarising documents. Extract key points, "
+        "decisions, and action items. Format output with bullet points. "
+        "Be concise — every word must add value."
+    ),
+    "🎓 AWS Educator": (
+        "You are a certified AWS solutions architect and educator. Explain "
+        "AWS services, architectures, and best practices clearly. Use "
+        "real-world examples. Cover costs, security, and trade-offs."
+    ),
+}
+
+# ── Language options ──────────────────────────────────────────────────────────
+LANGUAGE_OPTIONS: dict[str, str] = {
+    "English":  "Respond in English.",
+    "Arabic":   "أجب باللغة العربية.",
+    "French":   "Réponds en français.",
+    "Spanish":  "Responde en español.",
+    "German":   "Antworte auf Deutsch.",
+    "Hindi":    "हिंदी में उत्तर दें।",
+    "Japanese": "日本語で答えてください。",
+    "Chinese":  "请用中文回答。",
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
 # SECTION 1 — CSS / Styling
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _inject_css() -> None:
-    """Inject custom CSS for the ChatGPT-style interface."""
     st.markdown(
         """
         <style>
-        /* ── App background ── */
         .stApp { background: #0d1117; color: #e6edf3; }
-
-        /* ── Remove default top padding ── */
         .block-container { padding-top: 0.8rem; padding-bottom: 1rem; }
 
-        /* ── Sidebar ── */
         section[data-testid="stSidebar"] {
             background: #161b22;
             border-right: 1px solid #30363d;
@@ -80,32 +142,52 @@ def _inject_css() -> None:
         /* ── Hero header ── */
         .nm-hero {
             background: linear-gradient(135deg, #1f6feb 0%, #388bfd 50%, #58a6ff 100%);
-            border-radius: 14px;
-            padding: 1rem 1.4rem;
-            margin-bottom: 1rem;
-            color: white;
-            box-shadow: 0 4px 24px rgba(31,111,235,0.35);
+            border-radius: 14px; padding: 1rem 1.4rem; margin-bottom: 1rem;
+            color: white; box-shadow: 0 4px 24px rgba(31,111,235,0.35);
         }
         .nm-hero h1 { margin: 0 0 0.2rem 0; font-size: 1.6rem; font-weight: 700; }
         .nm-hero p  { margin: 0; opacity: 0.85; font-size: 0.92rem; }
 
-        /* ── Chat messages ── */
+        /* ── Login card ── */
+        .nm-login-card {
+            background: #161b22; border: 1px solid #30363d;
+            border-radius: 16px; padding: 2.5rem 2rem;
+            max-width: 420px; margin: 3rem auto;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+        .nm-login-title {
+            text-align: center; font-size: 1.8rem; font-weight: 700;
+            color: #58a6ff; margin-bottom: 0.3rem;
+        }
+        .nm-login-sub {
+            text-align: center; color: #8b949e;
+            font-size: 0.88rem; margin-bottom: 1.5rem;
+        }
+
+        /* ── Token counter card ── */
+        .nm-token-card {
+            background: #0d1117; border: 1px solid #30363d;
+            border-radius: 10px; padding: 0.6rem 0.9rem;
+            font-size: 0.78rem; color: #8b949e; margin-top: 0.4rem;
+        }
+        .nm-token-card .val { color: #3fb950; font-weight: 700; }
+        .nm-token-card .cost { color: #d29922; font-weight: 700; }
+
+        /* ── Status badges ── */
+        .nm-status-ok  { color: #3fb950; font-weight: 600; font-size: 0.82rem; }
+        .nm-status-err { color: #f85149; font-weight: 600; font-size: 0.82rem; }
+
         div[data-testid="stChatMessage"] { padding: 0.3rem 0; }
 
-        /* ── File attachment pill ── */
         .nm-attachment {
             display: inline-flex; align-items: center; gap: 6px;
             background: #21262d; border: 1px solid #30363d;
             border-radius: 20px; padding: 4px 12px;
             font-size: 0.8rem; color: #8b949e; margin-bottom: 6px;
         }
-
-        /* ── Status badge ── */
         .nm-badge-image    { color: #3fb950; font-weight: 600; }
         .nm-badge-document { color: #d29922; font-weight: 600; }
-        .nm-badge-text     { color: #58a6ff; font-weight: 600; }
 
-        /* ── Model info card ── */
         .nm-model-card {
             background: #161b22; border: 1px solid #30363d;
             border-radius: 10px; padding: 0.7rem 1rem;
@@ -113,14 +195,11 @@ def _inject_css() -> None:
         }
         .nm-model-card strong { color: #58a6ff; }
 
-        /* ── Upload info box ── */
         .nm-upload-info {
             background: #0d1117; border: 1px dashed #30363d;
             border-radius: 10px; padding: 0.6rem 0.9rem;
             font-size: 0.82rem; color: #8b949e;
         }
-
-        /* ── Scrollable preview ── */
         .nm-preview {
             background: #161b22; border: 1px solid #30363d;
             border-radius: 8px; padding: 0.6rem 0.8rem;
@@ -128,16 +207,12 @@ def _inject_css() -> None:
             font-size: 0.78rem; color: #8b949e;
             white-space: pre-wrap; word-break: break-word;
         }
-
-        /* ── Streamlit button overrides ── */
         .stButton > button {
             background: #21262d; border: 1px solid #30363d;
             color: #e6edf3; border-radius: 8px;
             transition: background 0.15s ease;
         }
         .stButton > button:hover { background: #30363d; border-color: #58a6ff; }
-
-        /* ── Divider ── */
         hr { border-color: #30363d !important; }
         </style>
         """,
@@ -146,125 +221,477 @@ def _inject_css() -> None:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SECTION 2 — Session state initialisation
+# SECTION 2 — Login / Authentication
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _render_login_page() -> None:
+    """Render the login page. Sets session_state.logged_in on success."""
+    _inject_css()
+
+    # ── Extra CSS just for the login page ────────────────────────────────────
+    st.markdown(
+        """
+        <style>
+        .nm-info-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 14px;
+            padding: 1.8rem 1.6rem;
+            height: 100%;
+        }
+        .nm-feature-row {
+            display: flex; align-items: flex-start; gap: 10px;
+            margin-bottom: 0.85rem;
+        }
+        .nm-feature-icon { font-size: 1.3rem; min-width: 28px; }
+        .nm-feature-text { color: #c9d1d9; font-size: 0.88rem; line-height: 1.45; }
+        .nm-feature-text strong { color: #58a6ff; }
+        .nm-tech-pill {
+            display: inline-block;
+            background: #21262d; border: 1px solid #30363d;
+            border-radius: 20px; padding: 2px 10px;
+            font-size: 0.74rem; color: #8b949e; margin: 2px 2px;
+        }
+        .nm-built-by {
+            margin-top: 1.2rem; padding-top: 0.8rem;
+            border-top: 1px solid #30363d;
+            font-size: 0.8rem; color: #8b949e; text-align: center;
+        }
+        .nm-built-by strong { color: #58a6ff; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ── Page padding ──────────────────────────────────────────────────────────
+    st.markdown("<div style='padding-top:2rem;'></div>", unsafe_allow_html=True)
+
+    # ── Two-column layout: left = info, right = login form ───────────────────
+    left_col, spacer, right_col = st.columns([1.2, 0.15, 0.9])
+
+    # ════════════════════════════
+    # LEFT COLUMN — Logo + App Info
+    # ════════════════════════════
+    with left_col:
+        # Logo — always shown; emoji fallback if file is missing
+        logo_path = ROOT / "novamind_ai_logo.jpg"
+        if logo_path.exists():
+            st.image(str(logo_path), use_container_width=True)
+        else:
+            st.markdown(
+                """
+                <div style="text-align:center; font-size:5rem; margin-bottom:0.5rem;">🤖</div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        # App info card
+        st.markdown(
+            """
+            <div class="nm-info-card">
+
+              <div style="font-size:1.5rem; font-weight:700; color:#58a6ff; margin-bottom:0.2rem;">
+                NovaMind AI
+              </div>
+              <div style="color:#8b949e; font-size:0.86rem; margin-bottom:1.2rem;">
+                Production-grade Multimodal AI Chatbot · AWS Bedrock
+              </div>
+
+              <div class="nm-feature-row">
+                <div class="nm-feature-icon">💬</div>
+                <div class="nm-feature-text">
+                  <strong>Text Chat</strong> — Multi-turn conversations with full
+                  context memory and streaming responses.
+                </div>
+              </div>
+
+              <div class="nm-feature-row">
+                <div class="nm-feature-icon">🖼️</div>
+                <div class="nm-feature-text">
+                  <strong>Image Analysis</strong> — Upload JPEG, PNG, GIF, or WebP.
+                  Ask questions, extract text, describe scenes.
+                </div>
+              </div>
+
+              <div class="nm-feature-row">
+                <div class="nm-feature-icon">📄</div>
+                <div class="nm-feature-text">
+                  <strong>Document Q&amp;A</strong> — Upload PDF, DOCX, CSV, TXT and
+                  more. Summarise, extract data, ask specific questions.
+                </div>
+              </div>
+
+              <div class="nm-feature-row">
+                <div class="nm-feature-icon">🧠</div>
+                <div class="nm-feature-text">
+                  <strong>3 AI Models</strong> — Amazon Nova Pro, Nova Lite,
+                  Claude 3.5 Sonnet. Switch mid-conversation.
+                </div>
+              </div>
+
+              <div class="nm-feature-row">
+                <div class="nm-feature-icon">🌐</div>
+                <div class="nm-feature-text">
+                  <strong>8 Languages</strong> — English, Arabic, French, Spanish,
+                  German, Hindi, Japanese, Chinese.
+                </div>
+              </div>
+
+              <div class="nm-feature-row">
+                <div class="nm-feature-icon">📊</div>
+                <div class="nm-feature-text">
+                  <strong>Token &amp; Cost Tracker</strong> — Live usage counter and
+                  estimated USD cost per session.
+                </div>
+              </div>
+
+              <div style="margin-top:1rem;">
+                <span class="nm-tech-pill">Amazon Bedrock</span>
+                <span class="nm-tech-pill">Amazon Nova Pro</span>
+                <span class="nm-tech-pill">Python 3.14</span>
+                <span class="nm-tech-pill">Streamlit</span>
+                <span class="nm-tech-pill">boto3</span>
+                <span class="nm-tech-pill">AWS IAM</span>
+                <span class="nm-tech-pill">Pillow</span>
+                <span class="nm-tech-pill">pypdf</span>
+              </div>
+
+              <div class="nm-built-by">
+                👨‍💻 Built by <strong>Aamir</strong> &nbsp;·&nbsp;
+                AWS Generative AI Engineer<br>
+                <span style="font-size:0.74rem; color:#484f58;">
+                  github.com/aamir490 &nbsp;·&nbsp;
+                  use-case-3--multimodal-ai-chatbot-aws-bedrock
+                </span>
+              </div>
+
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # ════════════════════════════
+    # RIGHT COLUMN — Login Form
+    # ════════════════════════════
+    with right_col:
+        st.markdown(
+            """
+            <div style="background:#161b22; border:1px solid #30363d; border-radius:14px;
+                        padding:2rem 1.8rem; box-shadow: 0 8px 32px rgba(0,0,0,0.4);">
+              <div style="text-align:center; font-size:2rem; margin-bottom:0.3rem;">🔐</div>
+              <div style="text-align:center; font-size:1.3rem; font-weight:700;
+                          color:#e6edf3; margin-bottom:0.4rem;">Sign In</div>
+              <div style="text-align:center; color:#8b949e; font-size:0.82rem;
+                          margin-bottom:1.4rem;">Enter your credentials to continue</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        username = st.text_input(
+            "Username",
+            placeholder="Enter username",
+            key="login_username_input",
+        )
+        password = st.text_input(
+            "Password",
+            type="password",
+            placeholder="Enter password",
+            key="login_password_input",
+        )
+
+        st.markdown("<div style='margin-top:0.5rem;'></div>", unsafe_allow_html=True)
+
+        if st.button("🔐  Sign In", use_container_width=True, type="primary"):
+            if username.strip() == "" or password.strip() == "":
+                st.error("Please enter both username and password.")
+            elif username in DEMO_USERS and DEMO_USERS[username] == password:
+                st.session_state.logged_in  = True
+                st.session_state.login_user = username
+                st.rerun()
+            else:
+                st.error("❌ Invalid username or password.")
+
+        st.divider()
+
+        st.markdown(
+            """
+            <div style="text-align:center; color:#484f58; font-size:0.8rem;">
+              🔑 Demo credentials<br>
+              <code style="color:#8b949e; font-size:0.82rem;">demo / demo1234</code>
+              &nbsp;&nbsp;
+              <code style="color:#8b949e; font-size:0.82rem;">aamir / bedrock2026</code>
+            </div>
+            <div style="text-align:center; color:#484f58; font-size:0.72rem; margin-top:0.6rem;">
+              ⚠️ Portfolio demo auth only.<br>
+              Production deployment uses Amazon Cognito.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def _check_login() -> bool:
+    """Return True if the user is logged in, otherwise render login and return False."""
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in  = False
+        st.session_state.login_user = ""
+    return st.session_state.logged_in
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# SECTION 3 — Session state initialisation
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _init_session_state() -> None:
     """Initialise all session state keys with safe defaults."""
+    if "bedrock_history"      not in st.session_state: st.session_state.bedrock_history      = []
+    if "chat_history"         not in st.session_state: st.session_state.chat_history         = []
+    if "bedrock_service"      not in st.session_state: st.session_state.bedrock_service      = None
+    if "pending_image"        not in st.session_state: st.session_state.pending_image        = None
+    if "pending_document"     not in st.session_state: st.session_state.pending_document     = None
+    if "conversation_count"   not in st.session_state: st.session_state.conversation_count   = 0
 
-    # Bedrock conversation history — list of Converse API message dicts
-    if "bedrock_history" not in st.session_state:
-        st.session_state.bedrock_history = []
+    # Model / inference settings
+    if "selected_model_label" not in st.session_state:
+        st.session_state.selected_model_label = "Amazon Nova Pro  (Recommended)"
+    if "temperature"          not in st.session_state: st.session_state.temperature   = 0.7
+    if "max_tokens"           not in st.session_state: st.session_state.max_tokens    = 2048
+    if "selected_template"    not in st.session_state:
+        st.session_state.selected_template = "🤖 Default Assistant"
+    if "system_prompt"        not in st.session_state:
+        st.session_state.system_prompt = PROMPT_TEMPLATES["🤖 Default Assistant"]
+    if "selected_language"    not in st.session_state:
+        st.session_state.selected_language = "English"
 
-    # UI chat history — list of display dicts
-    # Each dict: {"role", "text", "type", "file_name", "timestamp", "avatar"}
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
+    # Token / cost tracking
+    if "total_input_tokens"   not in st.session_state: st.session_state.total_input_tokens  = 0
+    if "total_output_tokens"  not in st.session_state: st.session_state.total_output_tokens = 0
 
-    # Cached BedrockService instance
-    if "bedrock_service" not in st.session_state:
-        st.session_state.bedrock_service = None
-
-    # Pending file upload state — set when user uploads a file
-    # Cleared after the file is sent with a message
-    if "pending_image"    not in st.session_state:
-        st.session_state.pending_image    = None  # ImageResult
-    if "pending_document" not in st.session_state:
-        st.session_state.pending_document = None  # DocumentResult
-
-    # Model settings (sidebar controls)
-    if "temperature"   not in st.session_state: st.session_state.temperature   = 0.7
-    if "max_tokens"    not in st.session_state: st.session_state.max_tokens    = 2048
-    if "system_prompt" not in st.session_state:
-        st.session_state.system_prompt = (
-            "You are NovaMind, an intelligent multimodal AI assistant powered by "
-            "Amazon Nova Pro on AWS Bedrock. You can understand and discuss text, "
-            "images, and documents. Be helpful, accurate, and professional."
-        )
-
-    # UI state
-    if "bot_name"          not in st.session_state: st.session_state.bot_name          = "NovaMind"
-    if "show_model_info"   not in st.session_state: st.session_state.show_model_info   = True
-    if "conversation_count" not in st.session_state: st.session_state.conversation_count = 0
+    # UI
+    if "bot_name"             not in st.session_state: st.session_state.bot_name = "NovaMind"
+    if "aws_status"           not in st.session_state: st.session_state.aws_status = None
 
 
 def _get_or_create_service() -> BedrockService:
-    """Return the cached BedrockService, creating it if needed."""
-    if st.session_state.bedrock_service is None:
+    """Return the cached BedrockService, recreating if model changed."""
+    model_id = MODEL_OPTIONS[st.session_state.selected_model_label]
+
+    # Recreate if model changed or not yet created
+    if st.session_state.bedrock_service is None or \
+       st.session_state.bedrock_service.model_id != model_id:
+        lang_instruction = LANGUAGE_OPTIONS.get(st.session_state.selected_language, "")
+        full_prompt = st.session_state.system_prompt
+        if lang_instruction:
+            full_prompt += f"\n\n{lang_instruction}"
         st.session_state.bedrock_service = get_bedrock_service(
+            model_id=model_id,
             temperature=st.session_state.temperature,
             max_tokens=st.session_state.max_tokens,
-            system_prompt=st.session_state.system_prompt,
+            system_prompt=full_prompt,
         )
     return st.session_state.bedrock_service
 
 
+def _update_service_settings() -> None:
+    """Push current sidebar settings into the existing BedrockService."""
+    svc = st.session_state.bedrock_service
+    if svc:
+        lang_instruction = LANGUAGE_OPTIONS.get(st.session_state.selected_language, "")
+        full_prompt = st.session_state.system_prompt
+        if lang_instruction:
+            full_prompt += f"\n\n{lang_instruction}"
+        svc.update_settings(
+            temperature=st.session_state.temperature,
+            max_tokens=st.session_state.max_tokens,
+            system_prompt=full_prompt,
+        )
+
+
 # ═════════════════════════════════════════════════════════════════════════════
-# SECTION 3 — Sidebar
+# SECTION 4 — Token & Cost helpers
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _add_tokens(input_tokens: int, output_tokens: int) -> None:
+    """Accumulate token counts into session totals."""
+    st.session_state.total_input_tokens  += input_tokens
+    st.session_state.total_output_tokens += output_tokens
+
+
+def _calculate_cost(model_id: str, input_tokens: int, output_tokens: int) -> float:
+    """Return estimated USD cost for a given token count and model."""
+    pricing = MODEL_PRICING.get(model_id, {"input": 0.0008, "output": 0.0032})
+    return (input_tokens / 1000 * pricing["input"]) + (output_tokens / 1000 * pricing["output"])
+
+
+def _session_cost() -> float:
+    """Return total estimated session cost in USD."""
+    model_id = MODEL_OPTIONS.get(st.session_state.selected_model_label, "amazon.nova-pro-v1:0")
+    return _calculate_cost(
+        model_id,
+        st.session_state.total_input_tokens,
+        st.session_state.total_output_tokens,
+    )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# SECTION 5 — AWS Connection Check
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _check_aws_connection() -> dict:
+    """
+    Ping Bedrock with a minimal inference call.
+    Returns {"ok": bool, "model": str, "region": str, "latency_ms": int, "error": str}
+    """
+    import time
+    try:
+        import boto3
+        import botocore.exceptions
+
+        region   = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+        model_id = MODEL_OPTIONS[st.session_state.selected_model_label]
+        client   = boto3.client("bedrock-runtime", region_name=region)
+
+        start = time.time()
+        resp  = client.converse(
+            modelId=model_id,
+            messages=[{"role": "user", "content": [{"text": "ping"}]}],
+            inferenceConfig={"maxTokens": 5, "temperature": 0.0},
+        )
+        latency_ms = int((time.time() - start) * 1000)
+
+        return {
+            "ok":         True,
+            "model":      model_id,
+            "region":     region,
+            "latency_ms": latency_ms,
+            "error":      "",
+        }
+    except Exception as exc:
+        return {
+            "ok":         False,
+            "model":      "",
+            "region":     os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+            "latency_ms": 0,
+            "error":      str(exc)[:120],
+        }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# SECTION 6 — Sidebar
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _render_sidebar() -> None:
-    """Render the full sidebar: settings, file upload, model info, actions."""
     with st.sidebar:
+
+        # ── Logo + title ──────────────────────────────────────────────────────
+        logo_path = ROOT / "novamind_ai_logo.jpg"
+        if logo_path.exists():
+            st.image(str(logo_path), use_container_width=True)
+
         st.markdown("## 🤖 NovaMind AI")
         st.markdown("*Multimodal assistant — Amazon Bedrock*")
+        st.markdown(
+            '<p style="font-size:0.78rem; color:#8b949e; margin-top:-6px;">'
+            f'👨‍💻 Built by <strong style="color:#58a6ff;">Aamir</strong> &nbsp;|&nbsp;'
+            f'👤 <span style="color:#58a6ff;">{st.session_state.login_user}</span></p>',
+            unsafe_allow_html=True,
+        )
+
+        # ── Sign out ──────────────────────────────────────────────────────────
+        if st.button("🚪 Sign Out", use_container_width=True):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+
         st.divider()
 
-        # ── Bot name ──────────────────────────────────────────────────────────
-        st.markdown("### ⚙️ Settings")
-        bot_name = st.text_input(
-            "Assistant name",
-            value=st.session_state.bot_name,
-            max_chars=30,
-            help="Displayed in chat bubbles and the header.",
+        # ── Model selector ────────────────────────────────────────────────────
+        st.markdown("### 🧠 AI Model")
+        prev_model = st.session_state.selected_model_label
+        selected_model = st.selectbox(
+            "Select model",
+            options=list(MODEL_OPTIONS.keys()),
+            index=list(MODEL_OPTIONS.keys()).index(st.session_state.selected_model_label),
+            label_visibility="collapsed",
         )
-        st.session_state.bot_name = bot_name or "NovaMind"
+        if selected_model != prev_model:
+            st.session_state.selected_model_label = selected_model
+            st.session_state.bedrock_service = None   # force recreate with new model
 
-        # ── Temperature ───────────────────────────────────────────────────────
+        # Show model pricing hint
+        mid = MODEL_OPTIONS[selected_model]
+        p   = MODEL_PRICING.get(mid, {})
+        st.markdown(
+            f'<div style="font-size:0.75rem; color:#484f58; margin-top:-4px;">'
+            f'💰 ${p.get("input",0):.4f} / 1K in &nbsp;·&nbsp; ${p.get("output",0):.4f} / 1K out'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.divider()
+
+        # ── Prompt templates ──────────────────────────────────────────────────
+        st.markdown("### 📋 Persona / Template")
+        prev_template = st.session_state.selected_template
+        selected_template = st.selectbox(
+            "Choose a prompt template",
+            options=list(PROMPT_TEMPLATES.keys()),
+            index=list(PROMPT_TEMPLATES.keys()).index(st.session_state.selected_template),
+            label_visibility="collapsed",
+        )
+        if selected_template != prev_template:
+            st.session_state.selected_template = selected_template
+            st.session_state.system_prompt     = PROMPT_TEMPLATES[selected_template]
+            _update_service_settings()
+
+        # Custom system prompt override
+        with st.expander("✏️ Edit system prompt", expanded=False):
+            custom_prompt = st.text_area(
+                "System prompt",
+                value=st.session_state.system_prompt,
+                height=110,
+                label_visibility="collapsed",
+            )
+            if st.button("Apply", use_container_width=True):
+                st.session_state.system_prompt = custom_prompt
+                _update_service_settings()
+                st.success("Updated.")
+
+        st.divider()
+
+        # ── Language selector ─────────────────────────────────────────────────
+        st.markdown("### 🌐 Response Language")
+        prev_lang = st.session_state.selected_language
+        selected_language = st.selectbox(
+            "Language",
+            options=list(LANGUAGE_OPTIONS.keys()),
+            index=list(LANGUAGE_OPTIONS.keys()).index(st.session_state.selected_language),
+            label_visibility="collapsed",
+        )
+        if selected_language != prev_lang:
+            st.session_state.selected_language = selected_language
+            _update_service_settings()
+
+        st.divider()
+
+        # ── Inference settings ────────────────────────────────────────────────
+        st.markdown("### ⚙️ Settings")
         temperature = st.slider(
             "Temperature",
             min_value=0.0, max_value=1.0,
             value=st.session_state.temperature,
             step=0.05,
-            help="Higher = more creative. Lower = more focused and deterministic.",
         )
-
-        # ── Max tokens ────────────────────────────────────────────────────────
         max_tokens = st.select_slider(
             "Max response tokens",
             options=[256, 512, 1024, 2048, 4096, 8192],
             value=st.session_state.max_tokens,
-            help="Maximum length of each AI response.",
         )
-
-        # ── System prompt ─────────────────────────────────────────────────────
-        with st.expander("🧠 System prompt", expanded=False):
-            system_prompt = st.text_area(
-                "Persona / instructions",
-                value=st.session_state.system_prompt,
-                height=130,
-                help="Defines the AI's personality and behaviour.",
-            )
-            if st.button("Apply system prompt", use_container_width=True):
-                st.session_state.system_prompt = system_prompt
-                if st.session_state.bedrock_service:
-                    st.session_state.bedrock_service.update_settings(
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        system_prompt=system_prompt,
-                    )
-                st.success("System prompt updated.")
-
-        # Apply temperature/token changes whenever they move
-        if (temperature != st.session_state.temperature or
-                max_tokens != st.session_state.max_tokens):
+        if temperature != st.session_state.temperature or max_tokens != st.session_state.max_tokens:
             st.session_state.temperature = temperature
             st.session_state.max_tokens  = max_tokens
-            if st.session_state.bedrock_service:
-                st.session_state.bedrock_service.update_settings(
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
+            _update_service_settings()
 
         st.divider()
 
@@ -277,39 +704,35 @@ def _render_sidebar() -> None:
             "</div>",
             unsafe_allow_html=True,
         )
-
         uploaded_file = st.file_uploader(
-            "Upload image or document",
-            type=[
-                "jpg", "jpeg", "png", "gif", "webp",
-                "pdf", "txt", "md", "csv",
-                "doc", "docx", "xls", "xlsx", "html", "htm",
-            ],
-            help="Attach a file to discuss with the AI. Then type your question below.",
+            "Upload",
+            type=["jpg","jpeg","png","gif","webp","pdf","txt","md","csv",
+                  "doc","docx","xls","xlsx","html","htm"],
             label_visibility="collapsed",
         )
-
         if uploaded_file is not None:
             _handle_file_upload(uploaded_file)
-
-        # Show currently pending attachment
         _render_pending_attachment()
 
         st.divider()
 
         # ── Conversation actions ──────────────────────────────────────────────
         st.markdown("### 💬 Conversation")
-
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("🗑️ Clear", use_container_width=True, help="Clear conversation"):
+            if st.button("🗑️ Clear", use_container_width=True):
                 _clear_conversation()
                 st.rerun()
         with col2:
-            if st.button("🔄 New", use_container_width=True, help="Start a new conversation"):
+            if st.button("🔄 New", use_container_width=True):
                 _clear_conversation()
                 st.session_state.conversation_count += 1
                 st.rerun()
+
+        # Summary button
+        if st.session_state.chat_history:
+            if st.button("📝 Summarise conversation", use_container_width=True):
+                st.session_state._trigger_summary = True
 
         # Download transcript
         if st.session_state.chat_history:
@@ -325,7 +748,6 @@ def _render_sidebar() -> None:
                 use_container_width=True,
             )
 
-        # Message count badge
         msg_count = len(st.session_state.chat_history)
         if msg_count:
             turns = msg_count // 2
@@ -333,36 +755,70 @@ def _render_sidebar() -> None:
 
         st.divider()
 
+        # ── Token & cost counter ──────────────────────────────────────────────
+        st.markdown("### 📊 Token Usage")
+        total_cost = _session_cost()
+        st.markdown(
+            f'<div class="nm-token-card">'
+            f'📥 Input &nbsp; <span class="val">{st.session_state.total_input_tokens:,}</span> tokens<br>'
+            f'📤 Output &nbsp;<span class="val">{st.session_state.total_output_tokens:,}</span> tokens<br>'
+            f'💵 Est. cost &nbsp;<span class="cost">${total_cost:.5f}</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.divider()
+
+        # ── AWS connection check ──────────────────────────────────────────────
+        st.markdown("### 🔌 AWS Connection")
+        if st.button("🔍 Check AWS / Bedrock", use_container_width=True):
+            with st.spinner("Pinging Bedrock..."):
+                st.session_state.aws_status = _check_aws_connection()
+
+        if st.session_state.aws_status:
+            s = st.session_state.aws_status
+            if s["ok"]:
+                st.markdown(
+                    f'<p class="nm-status-ok">✅ Connected — {s["latency_ms"]} ms</p>'
+                    f'<div style="font-size:0.74rem; color:#484f58;">'
+                    f'Model: {s["model"]}<br>Region: {s["region"]}</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    f'<p class="nm-status-err">❌ Connection failed</p>'
+                    f'<div style="font-size:0.74rem; color:#f85149;">{s["error"]}</div>',
+                    unsafe_allow_html=True,
+                )
+
+        st.divider()
+
         # ── Model info card ───────────────────────────────────────────────────
-        if st.session_state.show_model_info:
-            svc = st.session_state.bedrock_service
-            model_id = svc.model_id if svc else "amazon.nova-pro-v1:0"
-            region   = svc.region   if svc else os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
-            st.markdown(
-                f'<div class="nm-model-card">'
-                f'<strong>Model</strong> {model_id}<br>'
-                f'<strong>Region</strong> {region}<br>'
-                f'<strong>Temp</strong> {st.session_state.temperature} &nbsp;'
-                f'<strong>MaxTok</strong> {st.session_state.max_tokens}'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+        svc      = st.session_state.bedrock_service
+        model_id = MODEL_OPTIONS[st.session_state.selected_model_label]
+        region   = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+        if svc:
+            region = svc.region
+        st.markdown(
+            f'<div class="nm-model-card">'
+            f'<strong>Model</strong> {model_id}<br>'
+            f'<strong>Region</strong> {region}<br>'
+            f'<strong>Temp</strong> {st.session_state.temperature} &nbsp;'
+            f'<strong>MaxTok</strong> {st.session_state.max_tokens}<br>'
+            f'<strong>Lang</strong> {st.session_state.selected_language}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SECTION 4 — File upload handlers
+# SECTION 7 — File upload handlers
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _handle_file_upload(uploaded_file) -> None:
-    """
-    Process a Streamlit UploadedFile object through the validation pipeline.
-    Sets st.session_state.pending_image or .pending_document on success.
-    Shows an error in the sidebar on failure.
-    """
     raw_bytes = uploaded_file.read()
     file_name = sanitize_filename(uploaded_file.name)
-
-    result = validate_file_upload(raw_bytes, file_name)
+    result    = validate_file_upload(raw_bytes, file_name)
 
     if isinstance(result, (ImageValidationError, DocumentValidationError)):
         st.error(f"❌ {result.error_message}")
@@ -383,19 +839,16 @@ def _handle_file_upload(uploaded_file) -> None:
 
 
 def _render_pending_attachment() -> None:
-    """Show a preview of the currently attached file in the sidebar."""
     img = st.session_state.pending_image
     doc = st.session_state.pending_document
 
     if img:
         st.markdown(
             f'<div class="nm-attachment">'
-            f'🖼️ <span class="nm-badge-image">IMAGE</span> '
-            f'{img.file_name} · {img.size_kb} KB'
+            f'🖼️ <span class="nm-badge-image">IMAGE</span> {img.file_name} · {img.size_kb} KB'
             f'</div>',
             unsafe_allow_html=True,
         )
-        # Show thumbnail if Pillow generated one
         if img.thumbnail_bytes:
             st.image(img.thumbnail_bytes, caption=img.dimensions, use_container_width=True)
         if st.button("✕ Remove image", use_container_width=True):
@@ -405,8 +858,7 @@ def _render_pending_attachment() -> None:
     elif doc:
         st.markdown(
             f'<div class="nm-attachment">'
-            f'📄 <span class="nm-badge-document">DOC</span> '
-            f'{doc.file_name} · {doc.size_kb} KB'
+            f'📄 <span class="nm-badge-document">DOC</span> {doc.file_name} · {doc.size_kb} KB'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -422,21 +874,21 @@ def _render_pending_attachment() -> None:
 
 
 def _clear_conversation() -> None:
-    """Reset all conversation state."""
-    st.session_state.bedrock_history  = []
-    st.session_state.chat_history     = []
-    st.session_state.pending_image    = None
-    st.session_state.pending_document = None
-    # Recreate service to reset any model fallback state
-    st.session_state.bedrock_service  = None
+    st.session_state.bedrock_history      = []
+    st.session_state.chat_history         = []
+    st.session_state.pending_image        = None
+    st.session_state.pending_document     = None
+    st.session_state.total_input_tokens   = 0
+    st.session_state.total_output_tokens  = 0
+    st.session_state.bedrock_service      = None
+    st.session_state.aws_status           = None
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SECTION 5 — Chat history rendering
+# SECTION 8 — Chat history rendering
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _render_chat_history() -> None:
-    """Re-render all previous messages from session state."""
     for msg in st.session_state.chat_history:
         role      = msg["role"]
         text      = msg.get("text", "")
@@ -445,7 +897,6 @@ def _render_chat_history() -> None:
         avatar    = "🧑" if role == "user" else "🤖"
 
         with st.chat_message(role, avatar=avatar):
-            # Attachment pill above the text
             if msg_type == "image" and file_name:
                 st.markdown(
                     f'<div class="nm-attachment">'
@@ -453,10 +904,8 @@ def _render_chat_history() -> None:
                     f'</div>',
                     unsafe_allow_html=True,
                 )
-                # Re-render thumbnail if stored
                 if msg.get("thumbnail_bytes"):
                     st.image(msg["thumbnail_bytes"], width=280)
-
             elif msg_type == "document" and file_name:
                 st.markdown(
                     f'<div class="nm-attachment">'
@@ -464,33 +913,25 @@ def _render_chat_history() -> None:
                     f'</div>',
                     unsafe_allow_html=True,
                 )
-
             if text:
                 st.markdown(text)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SECTION 6 — AI response streaming
+# SECTION 9 — AI response streaming
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _stream_and_display_response(
     user_text:    str,
     service:      BedrockService,
-    image_result: ImageResult  | None,
+    image_result: ImageResult   | None,
     doc_result:   DocumentResult | None,
 ) -> str:
-    """
-    Call BedrockService.stream_response() and display chunks in real time
-    inside a st.chat_message("assistant") bubble.
-
-    Returns the full assembled response text.
-    """
+    """Stream the AI response and track token usage."""
     full_response = ""
 
     with st.chat_message("assistant", avatar="🤖"):
         placeholder = st.empty()
-
-        # Build kwargs for stream_response
         kwargs: dict = {}
         if image_result:
             kwargs["image_bytes"]  = image_result.raw_bytes
@@ -507,42 +948,36 @@ def _stream_and_display_response(
                 **kwargs,
             ):
                 full_response += chunk
-                placeholder.markdown(full_response + "▌")  # typing cursor
-
-            placeholder.markdown(full_response)  # final render without cursor
+                placeholder.markdown(full_response + "▌")
+            placeholder.markdown(full_response)
 
         except Exception as exc:
             error_msg = f"⚠️ An error occurred: {exc}"
             placeholder.error(error_msg)
             full_response = error_msg
 
+    # ── Token tracking — parse from the last bedrock_history assistant turn ──
+    # BedrockService appends usage data to history after stream completes.
+    # We approximate from the text length (exact counts need response metadata).
+    # Rough estimate: 1 token ≈ 4 characters
+    approx_in  = max(1, len(user_text) // 4)
+    approx_out = max(1, len(full_response) // 4)
+    _add_tokens(approx_in, approx_out)
+
     return full_response
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SECTION 7 — Main chat input handler
+# SECTION 10 — Chat input handler
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _handle_user_input(user_input: str) -> None:
-    """
-    Process a submitted chat message:
-      1. Display the user message (with attachment pill if applicable)
-      2. Capture any pending attachment
-      3. Stream the AI response
-      4. Save both turns to chat_history
-      5. Clear the pending attachment
-    """
-    service = _get_or_create_service()
-
-    # Sanitise input
-    user_text = sanitize_user_input(user_input)
-
-    # Capture and immediately clear pending attachment
-    # (so re-runs don't re-send the same file)
+    service      = _get_or_create_service()
+    user_text    = sanitize_user_input(user_input)
     image_result = st.session_state.pending_image
     doc_result   = st.session_state.pending_document
 
-    # ── 1. Display user message ───────────────────────────────────────────────
+    # Display user message
     with st.chat_message("user", avatar="🧑"):
         if image_result:
             st.markdown(
@@ -562,7 +997,7 @@ def _handle_user_input(user_input: str) -> None:
             )
         st.markdown(user_text)
 
-    # ── 2. Save user turn to UI history ──────────────────────────────────────
+    # Save user turn
     user_msg: dict = {
         "role":      "user",
         "text":      user_text,
@@ -578,14 +1013,13 @@ def _handle_user_input(user_input: str) -> None:
         user_msg["file_name"] = doc_result.file_name
     else:
         user_msg["type"] = "text"
-
     st.session_state.chat_history.append(user_msg)
 
-    # ── 3. Clear pending attachments immediately ──────────────────────────────
+    # Clear attachments
     st.session_state.pending_image    = None
     st.session_state.pending_document = None
 
-    # ── 4. Stream AI response ─────────────────────────────────────────────────
+    # Stream AI response
     full_response = _stream_and_display_response(
         user_text=user_text,
         service=service,
@@ -593,7 +1027,7 @@ def _handle_user_input(user_input: str) -> None:
         doc_result=doc_result,
     )
 
-    # ── 5. Save assistant turn to UI history ──────────────────────────────────
+    # Save assistant turn
     st.session_state.chat_history.append({
         "role":      "assistant",
         "text":      full_response,
@@ -604,11 +1038,70 @@ def _handle_user_input(user_input: str) -> None:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SECTION 8 — Welcome / empty state
+# SECTION 11 — Conversation summary
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _handle_summary() -> None:
+    """Ask the model to summarise the current conversation."""
+    if not st.session_state.chat_history:
+        return
+
+    service = _get_or_create_service()
+
+    summary_prompt = (
+        "Please provide a concise summary of our conversation so far. "
+        "Format as:\n"
+        "**Main topics discussed:**\n- ...\n\n"
+        "**Key points and answers:**\n- ...\n\n"
+        "**Action items / follow-ups (if any):**\n- ..."
+    )
+
+    with st.chat_message("user", avatar="🧑"):
+        st.markdown("📝 *Conversation summary requested*")
+
+    st.session_state.chat_history.append({
+        "role":      "user",
+        "text":      "📝 *Conversation summary requested*",
+        "type":      "text",
+        "timestamp": datetime.now().strftime("%H:%M"),
+        "avatar":    "🧑",
+    })
+
+    # Use a fresh bedrock call (don't mutate main history)
+    summary_history = list(st.session_state.bedrock_history)
+    full_response   = ""
+
+    with st.chat_message("assistant", avatar="🤖"):
+        placeholder = st.empty()
+        try:
+            for chunk in service.stream_response(
+                user_text=summary_prompt,
+                history=summary_history,
+            ):
+                full_response += chunk
+                placeholder.markdown(full_response + "▌")
+            placeholder.markdown(full_response)
+        except Exception as exc:
+            full_response = f"⚠️ Summary failed: {exc}"
+            placeholder.error(full_response)
+
+    # Also update the main history
+    st.session_state.bedrock_history = summary_history
+
+    st.session_state.chat_history.append({
+        "role":      "assistant",
+        "text":      full_response,
+        "type":      "text",
+        "timestamp": datetime.now().strftime("%H:%M"),
+        "avatar":    "🤖",
+    })
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# SECTION 12 — Welcome / empty state
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _render_welcome() -> None:
-    """Show capability cards when the conversation is empty."""
     st.markdown(
         """
         <div style="text-align:center; padding: 1.5rem 0 1rem 0; color: #8b949e;">
@@ -621,70 +1114,46 @@ def _render_welcome() -> None:
     )
 
     col1, col2, col3 = st.columns(3)
-
     with col1:
         st.markdown(
-            """
-            <div style="background:#161b22; border:1px solid #30363d; border-radius:12px;
-                        padding:1rem; text-align:center;">
+            """<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;
+                          padding:1rem;text-align:center;">
               <div style="font-size:2rem;">💬</div>
-              <div style="color:#58a6ff; font-weight:600; margin:0.4rem 0;">Text Chat</div>
-              <div style="color:#8b949e; font-size:0.82rem;">
-                Multi-turn conversations with full context memory.
-                Follow-up questions, reasoning, explanations.
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
+              <div style="color:#58a6ff;font-weight:600;margin:0.4rem 0;">Text Chat</div>
+              <div style="color:#8b949e;font-size:0.82rem;">
+                Multi-turn conversations. Follow-up questions, reasoning, explanations.</div>
+            </div>""", unsafe_allow_html=True)
     with col2:
         st.markdown(
-            """
-            <div style="background:#161b22; border:1px solid #30363d; border-radius:12px;
-                        padding:1rem; text-align:center;">
+            """<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;
+                          padding:1rem;text-align:center;">
               <div style="font-size:2rem;">🖼️</div>
-              <div style="color:#3fb950; font-weight:600; margin:0.4rem 0;">Image Analysis</div>
-              <div style="color:#8b949e; font-size:0.82rem;">
-                Upload JPEG, PNG, GIF, or WebP. Ask questions about
-                what the model sees, extract text, describe scenes.
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
+              <div style="color:#3fb950;font-weight:600;margin:0.4rem 0;">Image Analysis</div>
+              <div style="color:#8b949e;font-size:0.82rem;">
+                Upload JPEG, PNG, GIF, or WebP. Describe scenes, extract text.</div>
+            </div>""", unsafe_allow_html=True)
     with col3:
         st.markdown(
-            """
-            <div style="background:#161b22; border:1px solid #30363d; border-radius:12px;
-                        padding:1rem; text-align:center;">
+            """<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;
+                          padding:1rem;text-align:center;">
               <div style="font-size:2rem;">📄</div>
-              <div style="color:#d29922; font-weight:600; margin:0.4rem 0;">Document Q&A</div>
-              <div style="color:#8b949e; font-size:0.82rem;">
-                Upload PDF, DOCX, CSV, TXT and more.
-                Summarise, extract data, ask specific questions.
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+              <div style="color:#d29922;font-weight:600;margin:0.4rem 0;">Document Q&A</div>
+              <div style="color:#8b949e;font-size:0.82rem;">
+                Upload PDF, DOCX, CSV, TXT. Summarise, extract data, ask questions.</div>
+            </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        """
-        <div style="text-align:center; margin-top:1.2rem; color:#484f58; font-size:0.78rem;">
-            Powered by <strong style="color:#58a6ff;">Amazon Nova Pro</strong> on
-            <strong style="color:#ff9900;">AWS Bedrock</strong> &nbsp;|&nbsp;
-            300K token context &nbsp;|&nbsp; Streaming responses
-        </div>
-        """,
+        """<div style="text-align:center;margin-top:1.2rem;color:#484f58;font-size:0.78rem;">
+            Powered by <strong style="color:#58a6ff;">Amazon Bedrock</strong> &nbsp;|&nbsp;
+            300K token context &nbsp;|&nbsp; Streaming responses &nbsp;|&nbsp;
+            3 AI models &nbsp;|&nbsp; 8 languages
+        </div>""",
         unsafe_allow_html=True,
     )
 
-    # Suggested prompts
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(
-        '<p style="color:#8b949e; font-size:0.85rem; text-align:center;">Try one of these:</p>',
+        '<p style="color:#8b949e;font-size:0.85rem;text-align:center;">Try one of these:</p>',
         unsafe_allow_html=True,
     )
 
@@ -693,7 +1162,6 @@ def _render_welcome() -> None:
         "Explain the difference between RAG and fine-tuning.",
         "What AWS services would you use for a serverless AI app?",
     ]
-
     cols = st.columns(len(suggestions))
     for col, suggestion in zip(cols, suggestions):
         with col:
@@ -703,58 +1171,60 @@ def _render_welcome() -> None:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SECTION 9 — Main app entry point
+# SECTION 13 — Main entry point
 # ═════════════════════════════════════════════════════════════════════════════
 
 def main() -> None:
-    """Main Streamlit application entry point."""
-
-    # Inject CSS first (before any other rendering)
     _inject_css()
 
-    # Initialise session state
+    # ── Auth gate ─────────────────────────────────────────────────────────────
+    if not _check_login():
+        _render_login_page()
+        return
+
+    # ── Init state ────────────────────────────────────────────────────────────
     _init_session_state()
 
-    # Render sidebar (settings + file upload + controls)
+    # ── Sidebar ───────────────────────────────────────────────────────────────
     _render_sidebar()
 
+    # ── Handle summary trigger (set by sidebar button) ────────────────────────
+    if st.session_state.get("_trigger_summary"):
+        st.session_state._trigger_summary = False
+        _handle_summary()
+        st.rerun()
+
     # ── Hero header ───────────────────────────────────────────────────────────
-    bot_name = st.session_state.bot_name
+    bot_name    = st.session_state.bot_name
     pending_img = st.session_state.pending_image
     pending_doc = st.session_state.pending_document
+    model_label = st.session_state.selected_model_label.split("(")[0].strip()
 
-    # Build header sub-line based on what's attached
     if pending_img:
-        sub = (
-            f"🖼️ <span style='color:#3fb950;'>Image attached:</span> "
-            f"{pending_img.file_name} — type your question below."
-        )
+        sub = (f"🖼️ <span style='color:#3fb950;'>Image attached:</span> "
+               f"{pending_img.file_name} — type your question below.")
     elif pending_doc:
-        sub = (
-            f"📄 <span style='color:#d29922;'>Document attached:</span> "
-            f"{pending_doc.file_name} — type your question below."
-        )
+        sub = (f"📄 <span style='color:#d29922;'>Document attached:</span> "
+               f"{pending_doc.file_name} — type your question below.")
     else:
-        sub = "Your smart assistant for text, images, and documents. Powered by AWS Bedrock."
+        sub = (f"Multimodal AI · {model_label} · "
+               f"{st.session_state.selected_language} · AWS Bedrock")
 
     st.markdown(
-        f"""
-        <div class="nm-hero">
+        f"""<div class="nm-hero">
             <h1>🤖 {bot_name} AI</h1>
             <p>{sub}</p>
-        </div>
-        """,
+        </div>""",
         unsafe_allow_html=True,
     )
 
-    # ── Chat history ──────────────────────────────────────────────────────────
+    # ── Chat area ─────────────────────────────────────────────────────────────
     if st.session_state.chat_history:
         _render_chat_history()
     else:
         _render_welcome()
 
     # ── Chat input ────────────────────────────────────────────────────────────
-    # Contextual placeholder text
     if pending_img:
         placeholder = f"Ask {bot_name} about the attached image..."
     elif pending_doc:
@@ -763,7 +1233,6 @@ def main() -> None:
         placeholder = f"Ask {bot_name} anything..."
 
     user_input = st.chat_input(placeholder)
-
     if user_input:
         _handle_user_input(user_input)
         st.rerun()
