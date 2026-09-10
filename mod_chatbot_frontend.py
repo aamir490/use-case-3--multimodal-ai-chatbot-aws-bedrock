@@ -126,94 +126,157 @@ LANGUAGE_OPTIONS: dict[str, str] = {
 # SECTION 1 — CSS / Styling
 # ═════════════════════════════════════════════════════════════════════════════
 
+def _load_logo_bytes() -> bytes | None:
+    """Load logo as bytes — reliable across all OS/working-directory combinations."""
+    logo_path = ROOT / "novamind_ai_logo.jpg"
+    if logo_path.exists():
+        try:
+            return logo_path.read_bytes()
+        except Exception:
+            return None
+    return None
+
+
 def _inject_css() -> None:
     st.markdown(
         """
         <style>
+        /* ── Base ── */
         .stApp { background: #0d1117; color: #e6edf3; }
-        .block-container { padding-top: 0.8rem; padding-bottom: 1rem; }
+        .block-container { padding-top: 0.5rem; padding-bottom: 1rem; max-width: 1200px; }
 
+        /* ── Sidebar ── */
         section[data-testid="stSidebar"] {
-            background: #161b22;
-            border-right: 1px solid #30363d;
+            background: linear-gradient(180deg, #0d1117 0%, #161b22 100%);
+            border-right: 1px solid #21262d;
         }
         section[data-testid="stSidebar"] * { color: #e6edf3 !important; }
+        section[data-testid="stSidebar"] .stMarkdown p { color: #c9d1d9 !important; }
 
         /* ── Hero header ── */
         .nm-hero {
-            background: linear-gradient(135deg, #1f6feb 0%, #388bfd 50%, #58a6ff 100%);
-            border-radius: 14px; padding: 1rem 1.4rem; margin-bottom: 1rem;
-            color: white; box-shadow: 0 4px 24px rgba(31,111,235,0.35);
+            background: linear-gradient(135deg, #0d1b2a 0%, #1f3a5f 40%, #1f6feb 100%);
+            border: 1px solid #1f6feb;
+            border-radius: 16px; padding: 1.2rem 1.8rem; margin-bottom: 1.2rem;
+            color: white;
+            box-shadow: 0 4px 32px rgba(31,111,235,0.3), 0 0 0 1px rgba(88,166,255,0.15);
         }
-        .nm-hero h1 { margin: 0 0 0.2rem 0; font-size: 1.6rem; font-weight: 700; }
-        .nm-hero p  { margin: 0; opacity: 0.85; font-size: 0.92rem; }
-
-        /* ── Login card ── */
-        .nm-login-card {
-            background: #161b22; border: 1px solid #30363d;
-            border-radius: 16px; padding: 2.5rem 2rem;
-            max-width: 420px; margin: 3rem auto;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-        }
-        .nm-login-title {
-            text-align: center; font-size: 1.8rem; font-weight: 700;
-            color: #58a6ff; margin-bottom: 0.3rem;
-        }
-        .nm-login-sub {
-            text-align: center; color: #8b949e;
-            font-size: 0.88rem; margin-bottom: 1.5rem;
-        }
+        .nm-hero h1 { margin: 0 0 0.25rem 0; font-size: 1.7rem; font-weight: 800;
+                      letter-spacing: -0.3px; }
+        .nm-hero p  { margin: 0; opacity: 0.85; font-size: 0.9rem; }
 
         /* ── Token counter card ── */
         .nm-token-card {
-            background: #0d1117; border: 1px solid #30363d;
-            border-radius: 10px; padding: 0.6rem 0.9rem;
-            font-size: 0.78rem; color: #8b949e; margin-top: 0.4rem;
+            background: #0d1117; border: 1px solid #21262d;
+            border-radius: 10px; padding: 0.65rem 1rem;
+            font-size: 0.8rem; color: #8b949e; margin-top: 0.4rem;
+            line-height: 1.7;
         }
-        .nm-token-card .val { color: #3fb950; font-weight: 700; }
+        .nm-token-card .val  { color: #3fb950; font-weight: 700; }
         .nm-token-card .cost { color: #d29922; font-weight: 700; }
 
-        /* ── Status badges ── */
-        .nm-status-ok  { color: #3fb950; font-weight: 600; font-size: 0.82rem; }
-        .nm-status-err { color: #f85149; font-weight: 600; font-size: 0.82rem; }
+        /* ── Status ── */
+        .nm-status-ok  { color: #3fb950; font-weight: 600; font-size: 0.84rem; }
+        .nm-status-err { color: #f85149; font-weight: 600; font-size: 0.84rem; }
 
-        div[data-testid="stChatMessage"] { padding: 0.3rem 0; }
+        /* ── Chat messages ── */
+        div[data-testid="stChatMessage"] {
+            padding: 0.4rem 0;
+            border-radius: 12px;
+        }
 
+        /* ── Attachment pills ── */
         .nm-attachment {
             display: inline-flex; align-items: center; gap: 6px;
-            background: #21262d; border: 1px solid #30363d;
-            border-radius: 20px; padding: 4px 12px;
-            font-size: 0.8rem; color: #8b949e; margin-bottom: 6px;
-        }
-        .nm-badge-image    { color: #3fb950; font-weight: 600; }
-        .nm-badge-document { color: #d29922; font-weight: 600; }
-
-        .nm-model-card {
             background: #161b22; border: 1px solid #30363d;
+            border-radius: 20px; padding: 4px 14px;
+            font-size: 0.79rem; color: #8b949e; margin-bottom: 8px;
+        }
+        .nm-badge-image    { color: #3fb950; font-weight: 700; }
+        .nm-badge-document { color: #d29922; font-weight: 700; }
+
+        /* ── Model info card ── */
+        .nm-model-card {
+            background: #0d1117; border: 1px solid #21262d;
             border-radius: 10px; padding: 0.7rem 1rem;
-            font-size: 0.8rem; color: #8b949e; margin-top: 0.5rem;
+            font-size: 0.78rem; color: #6e7681; margin-top: 0.5rem;
+            line-height: 1.8;
         }
         .nm-model-card strong { color: #58a6ff; }
 
+        /* ── Upload info ── */
         .nm-upload-info {
             background: #0d1117; border: 1px dashed #30363d;
             border-radius: 10px; padding: 0.6rem 0.9rem;
-            font-size: 0.82rem; color: #8b949e;
+            font-size: 0.81rem; color: #8b949e; line-height: 1.6;
         }
+
+        /* ── Document preview ── */
         .nm-preview {
-            background: #161b22; border: 1px solid #30363d;
-            border-radius: 8px; padding: 0.6rem 0.8rem;
+            background: #0d1117; border: 1px solid #21262d;
+            border-radius: 8px; padding: 0.7rem 0.9rem;
             max-height: 180px; overflow-y: auto;
-            font-size: 0.78rem; color: #8b949e;
+            font-size: 0.77rem; color: #8b949e;
             white-space: pre-wrap; word-break: break-word;
         }
-        .stButton > button {
-            background: #21262d; border: 1px solid #30363d;
-            color: #e6edf3; border-radius: 8px;
-            transition: background 0.15s ease;
+
+        /* ── Welcome feature cards ── */
+        .nm-feat-card {
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 14px;
+            padding: 1.2rem 1rem;
+            text-align: center;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            height: 100%;
         }
-        .stButton > button:hover { background: #30363d; border-color: #58a6ff; }
-        hr { border-color: #30363d !important; }
+        .nm-feat-card:hover {
+            border-color: #388bfd;
+            box-shadow: 0 4px 20px rgba(31,111,235,0.2);
+        }
+        .nm-feat-icon  { font-size: 2.2rem; margin-bottom: 0.5rem; }
+        .nm-feat-title { font-weight: 700; margin-bottom: 0.3rem; font-size: 0.95rem; }
+        .nm-feat-desc  { color: #8b949e; font-size: 0.81rem; line-height: 1.5; }
+
+        /* ── Buttons ── */
+        .stButton > button {
+            background: #161b22 !important;
+            border: 1px solid #30363d !important;
+            color: #e6edf3 !important;
+            border-radius: 8px !important;
+            font-weight: 500 !important;
+            transition: all 0.15s ease !important;
+        }
+        .stButton > button:hover {
+            background: #21262d !important;
+            border-color: #58a6ff !important;
+            color: #58a6ff !important;
+        }
+
+        /* ── Divider ── */
+        hr { border-color: #21262d !important; margin: 0.6rem 0 !important; }
+
+        /* ── Inputs ── */
+        .stTextInput > div > div > input,
+        .stTextArea > div > div > textarea {
+            background: #0d1117 !important;
+            border: 1px solid #30363d !important;
+            color: #e6edf3 !important;
+            border-radius: 8px !important;
+        }
+        .stTextInput > div > div > input:focus,
+        .stTextArea > div > div > textarea:focus {
+            border-color: #58a6ff !important;
+            box-shadow: 0 0 0 2px rgba(88,166,255,0.15) !important;
+        }
+
+        /* ── Selectbox ── */
+        .stSelectbox > div > div {
+            background: #0d1117 !important;
+            border: 1px solid #30363d !important;
+            color: #e6edf3 !important;
+            border-radius: 8px !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -228,165 +291,212 @@ def _render_login_page() -> None:
     """Render the login page. Sets session_state.logged_in on success."""
     _inject_css()
 
-    # ── Extra CSS just for the login page ────────────────────────────────────
-    st.markdown(
-        """
-        <style>
-        .nm-info-card {
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 14px;
-            padding: 1.8rem 1.6rem;
-            height: 100%;
-        }
-        .nm-feature-row {
-            display: flex; align-items: flex-start; gap: 10px;
-            margin-bottom: 0.85rem;
-        }
-        .nm-feature-icon { font-size: 1.3rem; min-width: 28px; }
-        .nm-feature-text { color: #c9d1d9; font-size: 0.88rem; line-height: 1.45; }
-        .nm-feature-text strong { color: #58a6ff; }
-        .nm-tech-pill {
-            display: inline-block;
-            background: #21262d; border: 1px solid #30363d;
-            border-radius: 20px; padding: 2px 10px;
-            font-size: 0.74rem; color: #8b949e; margin: 2px 2px;
-        }
-        .nm-built-by {
-            margin-top: 1.2rem; padding-top: 0.8rem;
-            border-top: 1px solid #30363d;
-            font-size: 0.8rem; color: #8b949e; text-align: center;
-        }
-        .nm-built-by strong { color: #58a6ff; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    # ── Login-page-only CSS ───────────────────────────────────────────────────
+    st.markdown("""
+    <style>
+    /* Full-page dark gradient background for login */
+    .stApp {
+        background: radial-gradient(ellipse at 20% 50%, #0d1b2a 0%, #0d1117 60%) !important;
+    }
+    /* Glow animation for logo */
+    @keyframes logoGlow {
+        0%   { box-shadow: 0 0 16px 4px rgba(31,111,235,0.35); }
+        50%  { box-shadow: 0 0 32px 10px rgba(88,166,255,0.55); }
+        100% { box-shadow: 0 0 16px 4px rgba(31,111,235,0.35); }
+    }
+    .nm-logo-wrap {
+        border-radius: 20px;
+        overflow: hidden;
+        animation: logoGlow 3s ease-in-out infinite;
+        margin-bottom: 1.2rem;
+    }
+    .nm-logo-wrap img { width: 100%; border-radius: 20px; display: block; }
+    /* Info card */
+    .nm-info-card {
+        background: #161b22;
+        border: 1px solid #21262d;
+        border-radius: 16px;
+        padding: 1.8rem 1.6rem;
+    }
+    .nm-info-title {
+        font-size: 1.6rem; font-weight: 800; color: #58a6ff;
+        margin-bottom: 0.15rem; letter-spacing: -0.3px;
+    }
+    .nm-info-sub {
+        font-size: 0.84rem; color: #8b949e; margin-bottom: 1.3rem;
+    }
+    .nm-feat-row {
+        display: flex; align-items: flex-start; gap: 10px; margin-bottom: 0.8rem;
+    }
+    .nm-feat-icon { font-size: 1.25rem; min-width: 26px; }
+    .nm-feat-body { color: #c9d1d9; font-size: 0.85rem; line-height: 1.45; }
+    .nm-feat-body strong { color: #79c0ff; }
+    .nm-pill {
+        display: inline-block;
+        background: #0d1117; border: 1px solid #30363d;
+        border-radius: 20px; padding: 2px 10px;
+        font-size: 0.73rem; color: #8b949e; margin: 2px 2px;
+    }
+    .nm-built {
+        margin-top: 1.1rem; padding-top: 0.9rem;
+        border-top: 1px solid #21262d;
+        text-align: center;
+    }
+    /* Login form card */
+    .nm-form-card {
+        background: #161b22;
+        border: 1px solid #21262d;
+        border-radius: 16px;
+        padding: 2rem 1.8rem 1.4rem 1.8rem;
+        box-shadow: 0 8px 40px rgba(0,0,0,0.5),
+                    0 0 0 1px rgba(88,166,255,0.08);
+    }
+    .nm-form-title {
+        text-align: center; font-size: 1.4rem; font-weight: 800;
+        color: #e6edf3; margin-bottom: 0.2rem;
+    }
+    .nm-form-sub {
+        text-align: center; color: #8b949e;
+        font-size: 0.82rem; margin-bottom: 1.5rem;
+    }
+    .nm-cred-box {
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 10px;
+        padding: 0.9rem 1.1rem;
+        margin-top: 0.5rem;
+    }
+    .nm-cred-row {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-bottom: 0.35rem;
+    }
+    .nm-cred-label { color: #8b949e; font-size: 0.78rem; }
+    .nm-cred-val {
+        font-family: monospace; font-size: 0.84rem; font-weight: 700;
+        color: #a5d6ff; letter-spacing: 0.3px;
+    }
+    .nm-warning {
+        color: #d29922; font-size: 0.77rem; font-weight: 600;
+        text-align: center; margin-top: 0.6rem; line-height: 1.5;
+    }
+    .nm-cognito-note {
+        color: #6e7681; font-size: 0.72rem; text-align: center;
+        margin-top: 0.3rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-    # ── Page padding ──────────────────────────────────────────────────────────
-    st.markdown("<div style='padding-top:2rem;'></div>", unsafe_allow_html=True)
+    logo_bytes = _load_logo_bytes()
 
-    # ── Two-column layout: left = info, right = login form ───────────────────
-    left_col, spacer, right_col = st.columns([1.2, 0.15, 0.9])
+    st.markdown("<div style='padding-top:1.8rem;'></div>", unsafe_allow_html=True)
 
-    # ════════════════════════════
-    # LEFT COLUMN — Logo + App Info
-    # ════════════════════════════
+    left_col, gap, right_col = st.columns([1.25, 0.1, 0.85])
+
+    # ══════════════════════════════════════════
+    # LEFT — Logo + App Info
+    # ══════════════════════════════════════════
     with left_col:
-        # Logo — always shown; emoji fallback if file is missing
-        logo_path = ROOT / "novamind_ai_logo.jpg"
-        if logo_path.exists():
-            st.image(str(logo_path), use_container_width=True)
+        # Logo with glow effect
+        if logo_bytes:
+            import base64
+            b64 = base64.b64encode(logo_bytes).decode()
+            st.markdown(
+                f'<div class="nm-logo-wrap">'
+                f'<img src="data:image/jpeg;base64,{b64}" alt="NovaMind AI Logo"/>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
         else:
             st.markdown(
-                """
-                <div style="text-align:center; font-size:5rem; margin-bottom:0.5rem;">🤖</div>
-                """,
+                '<div style="text-align:center;font-size:5rem;margin-bottom:1rem;'
+                'filter:drop-shadow(0 0 20px #1f6feb);">🤖</div>',
                 unsafe_allow_html=True,
             )
 
         # App info card
-        st.markdown(
-            """
-            <div class="nm-info-card">
+        st.markdown("""
+        <div class="nm-info-card">
+          <div class="nm-info-title">NovaMind AI</div>
+          <div class="nm-info-sub">Production-grade Multimodal AI Chatbot · AWS Bedrock</div>
 
-              <div style="font-size:1.5rem; font-weight:700; color:#58a6ff; margin-bottom:0.2rem;">
-                NovaMind AI
-              </div>
-              <div style="color:#8b949e; font-size:0.86rem; margin-bottom:1.2rem;">
-                Production-grade Multimodal AI Chatbot · AWS Bedrock
-              </div>
-
-              <div class="nm-feature-row">
-                <div class="nm-feature-icon">💬</div>
-                <div class="nm-feature-text">
-                  <strong>Text Chat</strong> — Multi-turn conversations with full
-                  context memory and streaming responses.
-                </div>
-              </div>
-
-              <div class="nm-feature-row">
-                <div class="nm-feature-icon">🖼️</div>
-                <div class="nm-feature-text">
-                  <strong>Image Analysis</strong> — Upload JPEG, PNG, GIF, or WebP.
-                  Ask questions, extract text, describe scenes.
-                </div>
-              </div>
-
-              <div class="nm-feature-row">
-                <div class="nm-feature-icon">📄</div>
-                <div class="nm-feature-text">
-                  <strong>Document Q&amp;A</strong> — Upload PDF, DOCX, CSV, TXT and
-                  more. Summarise, extract data, ask specific questions.
-                </div>
-              </div>
-
-              <div class="nm-feature-row">
-                <div class="nm-feature-icon">🧠</div>
-                <div class="nm-feature-text">
-                  <strong>3 AI Models</strong> — Amazon Nova Pro, Nova Lite,
-                  Claude 3.5 Sonnet. Switch mid-conversation.
-                </div>
-              </div>
-
-              <div class="nm-feature-row">
-                <div class="nm-feature-icon">🌐</div>
-                <div class="nm-feature-text">
-                  <strong>8 Languages</strong> — English, Arabic, French, Spanish,
-                  German, Hindi, Japanese, Chinese.
-                </div>
-              </div>
-
-              <div class="nm-feature-row">
-                <div class="nm-feature-icon">📊</div>
-                <div class="nm-feature-text">
-                  <strong>Token &amp; Cost Tracker</strong> — Live usage counter and
-                  estimated USD cost per session.
-                </div>
-              </div>
-
-              <div style="margin-top:1rem;">
-                <span class="nm-tech-pill">Amazon Bedrock</span>
-                <span class="nm-tech-pill">Amazon Nova Pro</span>
-                <span class="nm-tech-pill">Python 3.14</span>
-                <span class="nm-tech-pill">Streamlit</span>
-                <span class="nm-tech-pill">boto3</span>
-                <span class="nm-tech-pill">AWS IAM</span>
-                <span class="nm-tech-pill">Pillow</span>
-                <span class="nm-tech-pill">pypdf</span>
-              </div>
-
-              <div class="nm-built-by">
-                👨‍💻 Built by <strong>Aamir</strong> &nbsp;·&nbsp;
-                AWS Generative AI Engineer<br>
-                <span style="font-size:0.74rem; color:#484f58;">
-                  github.com/aamir490 &nbsp;·&nbsp;
-                  use-case-3--multimodal-ai-chatbot-aws-bedrock
-                </span>
-              </div>
-
+          <div class="nm-feat-row">
+            <div class="nm-feat-icon">💬</div>
+            <div class="nm-feat-body">
+              <strong>Text Chat</strong> — Multi-turn conversations with streaming
+              responses and full context memory.
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
+          </div>
+          <div class="nm-feat-row">
+            <div class="nm-feat-icon">🖼️</div>
+            <div class="nm-feat-body">
+              <strong>Image Analysis</strong> — Upload JPEG, PNG, GIF or WebP.
+              Ask questions, extract text, describe scenes.
+            </div>
+          </div>
+          <div class="nm-feat-row">
+            <div class="nm-feat-icon">📄</div>
+            <div class="nm-feat-body">
+              <strong>Document Q&amp;A</strong> — Upload PDF, DOCX, CSV, TXT and more.
+              Summarise, extract data, ask specific questions.
+            </div>
+          </div>
+          <div class="nm-feat-row">
+            <div class="nm-feat-icon">🧠</div>
+            <div class="nm-feat-body">
+              <strong>3 AI Models</strong> — Nova Pro, Nova Lite, Claude 3.5 Sonnet.
+              Switch mid-conversation.
+            </div>
+          </div>
+          <div class="nm-feat-row">
+            <div class="nm-feat-icon">🌐</div>
+            <div class="nm-feat-body">
+              <strong>8 Languages</strong> — English, Arabic, French, Spanish,
+              German, Hindi, Japanese, Chinese.
+            </div>
+          </div>
+          <div class="nm-feat-row">
+            <div class="nm-feat-icon">📊</div>
+            <div class="nm-feat-body">
+              <strong>Token &amp; Cost Tracker</strong> — Live session usage with
+              estimated USD cost per model.
+            </div>
+          </div>
 
-    # ════════════════════════════
-    # RIGHT COLUMN — Login Form
-    # ════════════════════════════
+          <div style="margin-top:1rem;">
+            <span class="nm-pill">Amazon Bedrock</span>
+            <span class="nm-pill">Amazon Nova Pro</span>
+            <span class="nm-pill">Python 3.14</span>
+            <span class="nm-pill">Streamlit</span>
+            <span class="nm-pill">boto3</span>
+            <span class="nm-pill">AWS IAM</span>
+            <span class="nm-pill">Pillow</span>
+            <span class="nm-pill">pypdf</span>
+          </div>
+
+          <div class="nm-built">
+            <div style="font-size:0.88rem; font-weight:700; color:#c9d1d9;">
+              👨‍💻 Built by <span style="color:#58a6ff;">Aamir</span>
+              &nbsp;·&nbsp; AWS Generative AI Engineer
+            </div>
+            <div style="font-size:0.75rem; color:#6e7681; margin-top:0.25rem;">
+              github.com/aamir490
+              &nbsp;·&nbsp;
+              use-case-3--multimodal-ai-chatbot-aws-bedrock
+            </div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════
+    # RIGHT — Login Form
+    # ══════════════════════════════════════════
     with right_col:
-        st.markdown(
-            """
-            <div style="background:#161b22; border:1px solid #30363d; border-radius:14px;
-                        padding:2rem 1.8rem; box-shadow: 0 8px 32px rgba(0,0,0,0.4);">
-              <div style="text-align:center; font-size:2rem; margin-bottom:0.3rem;">🔐</div>
-              <div style="text-align:center; font-size:1.3rem; font-weight:700;
-                          color:#e6edf3; margin-bottom:0.4rem;">Sign In</div>
-              <div style="text-align:center; color:#8b949e; font-size:0.82rem;
-                          margin-bottom:1.4rem;">Enter your credentials to continue</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.markdown("""
+        <div class="nm-form-card">
+          <div class="nm-form-title">🔐 Sign In</div>
+          <div class="nm-form-sub">Enter your credentials to continue</div>
+        </div>
+        """, unsafe_allow_html=True)
 
         username = st.text_input(
             "Username",
@@ -400,7 +510,7 @@ def _render_login_page() -> None:
             key="login_password_input",
         )
 
-        st.markdown("<div style='margin-top:0.5rem;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
 
         if st.button("🔐  Sign In", use_container_width=True, type="primary"):
             if username.strip() == "" or password.strip() == "":
@@ -412,23 +522,38 @@ def _render_login_page() -> None:
             else:
                 st.error("❌ Invalid username or password.")
 
-        st.divider()
-
-        st.markdown(
-            """
-            <div style="text-align:center; color:#484f58; font-size:0.8rem;">
-              🔑 Demo credentials<br>
-              <code style="color:#8b949e; font-size:0.82rem;">demo / demo1234</code>
-              &nbsp;&nbsp;
-              <code style="color:#8b949e; font-size:0.82rem;">aamir / bedrock2026</code>
-            </div>
-            <div style="text-align:center; color:#484f58; font-size:0.72rem; margin-top:0.6rem;">
-              ⚠️ Portfolio demo auth only.<br>
-              Production deployment uses Amazon Cognito.
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        # ── Credentials box ────────────────────────────────────────────────
+        st.markdown("""
+        <div class="nm-cred-box">
+          <div style="font-size:0.8rem; font-weight:700; color:#8b949e;
+                      margin-bottom:0.5rem; letter-spacing:0.5px;">
+            🔑 DEMO CREDENTIALS
+          </div>
+          <div class="nm-cred-row">
+            <span class="nm-cred-label">Username</span>
+            <span class="nm-cred-val">demo</span>
+          </div>
+          <div class="nm-cred-row" style="margin-bottom:0.6rem;">
+            <span class="nm-cred-label">Password</span>
+            <span class="nm-cred-val">demo1234</span>
+          </div>
+          <div class="nm-cred-row">
+            <span class="nm-cred-label">Username</span>
+            <span class="nm-cred-val">aamir</span>
+          </div>
+          <div class="nm-cred-row" style="margin-bottom:0;">
+            <span class="nm-cred-label">Password</span>
+            <span class="nm-cred-val">bedrock2026</span>
+          </div>
+        </div>
+        <div class="nm-warning">
+          ⚠️ Portfolio demo auth only.<br>
+          Production deployment uses Amazon Cognito.
+        </div>
+        <div class="nm-cognito-note">
+          This project was built for interview &amp; portfolio demonstration.
+        </div>
+        """, unsafe_allow_html=True)
 
 
 def _check_login() -> bool:
@@ -585,9 +710,24 @@ def _render_sidebar() -> None:
     with st.sidebar:
 
         # ── Logo + title ──────────────────────────────────────────────────────
-        logo_path = ROOT / "novamind_ai_logo.jpg"
-        if logo_path.exists():
-            st.image(str(logo_path), use_container_width=True)
+        logo_bytes = _load_logo_bytes()
+        if logo_bytes:
+            import base64
+            b64 = base64.b64encode(logo_bytes).decode()
+            st.markdown(
+                f'<div style="border-radius:14px; overflow:hidden; margin-bottom:0.8rem;'
+                f'box-shadow:0 0 18px rgba(31,111,235,0.4);">'
+                f'<img src="data:image/jpeg;base64,{b64}" '
+                f'style="width:100%;display:block;" alt="NovaMind AI"/>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div style="text-align:center;font-size:3rem;margin-bottom:0.5rem;'
+                'filter:drop-shadow(0 0 12px #1f6feb);">🤖</div>',
+                unsafe_allow_html=True,
+            )
 
         st.markdown("## 🤖 NovaMind AI")
         st.markdown("*Multimodal assistant — Amazon Bedrock*")
@@ -1103,60 +1243,49 @@ def _handle_summary() -> None:
 
 def _render_welcome() -> None:
     st.markdown(
-        """
-        <div style="text-align:center; padding: 1.5rem 0 1rem 0; color: #8b949e;">
-            <p style="font-size:0.95rem;">
-                Ask me anything, upload an image to analyse, or attach a PDF to explore.
-            </p>
-        </div>
-        """,
+        '<div style="text-align:center;padding:1.8rem 0 1.2rem;color:#8b949e;'
+        'font-size:0.96rem;">Ask me anything · upload an image · or attach a document</div>',
         unsafe_allow_html=True,
     )
 
     col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown(
-            """<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;
-                          padding:1rem;text-align:center;">
-              <div style="font-size:2rem;">💬</div>
-              <div style="color:#58a6ff;font-weight:600;margin:0.4rem 0;">Text Chat</div>
-              <div style="color:#8b949e;font-size:0.82rem;">
-                Multi-turn conversations. Follow-up questions, reasoning, explanations.</div>
-            </div>""", unsafe_allow_html=True)
-    with col2:
-        st.markdown(
-            """<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;
-                          padding:1rem;text-align:center;">
-              <div style="font-size:2rem;">🖼️</div>
-              <div style="color:#3fb950;font-weight:600;margin:0.4rem 0;">Image Analysis</div>
-              <div style="color:#8b949e;font-size:0.82rem;">
-                Upload JPEG, PNG, GIF, or WebP. Describe scenes, extract text.</div>
-            </div>""", unsafe_allow_html=True)
-    with col3:
-        st.markdown(
-            """<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;
-                          padding:1rem;text-align:center;">
-              <div style="font-size:2rem;">📄</div>
-              <div style="color:#d29922;font-weight:600;margin:0.4rem 0;">Document Q&A</div>
-              <div style="color:#8b949e;font-size:0.82rem;">
-                Upload PDF, DOCX, CSV, TXT. Summarise, extract data, ask questions.</div>
-            </div>""", unsafe_allow_html=True)
+    cards = [
+        ("💬", "#58a6ff", "Text Chat",
+         "Multi-turn conversations with full context memory. "
+         "Follow-up questions, reasoning, and explanations."),
+        ("🖼️", "#3fb950", "Image Analysis",
+         "Upload JPEG, PNG, GIF, or WebP. "
+         "Ask questions, extract text, describe scenes."),
+        ("📄", "#d29922", "Document Q&A",
+         "Upload PDF, DOCX, CSV, TXT and more. "
+         "Summarise, extract data, ask specific questions."),
+    ]
+    for col, (icon, color, title, desc) in zip([col1, col2, col3], cards):
+        with col:
+            st.markdown(
+                f'<div class="nm-feat-card">'
+                f'<div class="nm-feat-icon">{icon}</div>'
+                f'<div class="nm-feat-title" style="color:{color};">{title}</div>'
+                f'<div class="nm-feat-desc">{desc}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
     st.markdown(
-        """<div style="text-align:center;margin-top:1.2rem;color:#484f58;font-size:0.78rem;">
-            Powered by <strong style="color:#58a6ff;">Amazon Bedrock</strong> &nbsp;|&nbsp;
-            300K token context &nbsp;|&nbsp; Streaming responses &nbsp;|&nbsp;
-            3 AI models &nbsp;|&nbsp; 8 languages
-        </div>""",
+        '<div style="text-align:center;margin-top:1.4rem;color:#484f58;font-size:0.78rem;">'
+        'Powered by <strong style="color:#58a6ff;">Amazon Bedrock</strong> &nbsp;·&nbsp;'
+        '300K token context &nbsp;·&nbsp; Streaming responses &nbsp;·&nbsp;'
+        '3 AI models &nbsp;·&nbsp; 8 languages'
+        '</div>',
         unsafe_allow_html=True,
     )
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
     st.markdown(
-        '<p style="color:#8b949e;font-size:0.85rem;text-align:center;">Try one of these:</p>',
+        '<p style="color:#6e7681;font-size:0.85rem;text-align:center;margin-bottom:0.5rem;">'
+        '✨ Try one of these to get started:</p>',
         unsafe_allow_html=True,
     )
-
     suggestions = [
         "What is Amazon Bedrock and how does it work?",
         "Explain the difference between RAG and fine-tuning.",
@@ -1201,14 +1330,17 @@ def main() -> None:
     model_label = st.session_state.selected_model_label.split("(")[0].strip()
 
     if pending_img:
-        sub = (f"🖼️ <span style='color:#3fb950;'>Image attached:</span> "
-               f"{pending_img.file_name} — type your question below.")
+        sub = (f"🖼️ <span style='color:#3fb950;font-weight:600;'>Image attached:</span> "
+               f"<span style='color:#c9d1d9;'>{pending_img.file_name}</span> — type your question below.")
     elif pending_doc:
-        sub = (f"📄 <span style='color:#d29922;'>Document attached:</span> "
-               f"{pending_doc.file_name} — type your question below.")
+        sub = (f"📄 <span style='color:#d29922;font-weight:600;'>Document attached:</span> "
+               f"<span style='color:#c9d1d9;'>{pending_doc.file_name}</span> — type your question below.")
     else:
-        sub = (f"Multimodal AI · {model_label} · "
-               f"{st.session_state.selected_language} · AWS Bedrock")
+        sub = (f"<span style='opacity:0.75;'>{model_label}</span>"
+               f" &nbsp;·&nbsp; <span style='opacity:0.75;'>{st.session_state.selected_language}</span>"
+               f" &nbsp;·&nbsp; <span style='opacity:0.75;'>AWS Bedrock</span>"
+               f" &nbsp;·&nbsp; <span style='opacity:0.6;font-size:0.82rem;'>"
+               f"👤 {st.session_state.login_user}</span>")
 
     st.markdown(
         f"""<div class="nm-hero">
