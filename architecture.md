@@ -1,321 +1,126 @@
-# Architecture — NovaMind AI Multimodal Chatbot
+# Architecture — NovaMind AI
 
-## 1. Overview
+## Scope
 
-NovaMind AI is a **multimodal conversational AI application** that processes text, images, and documents through a single unified interface. The architecture follows a clean layered design: a Streamlit frontend, a service layer for business logic, and Amazon Bedrock as the AI inference backend.
+NovaMind AI is a **single active Streamlit-session** multimodal assistant. A user can send text, attach one image, or attach one document and ask a question about it. The current repository does not provide durable user identity, persistent history, a document corpus, asynchronous jobs, or an API for other systems.
 
-The application is intentionally **not over-engineered**. Services that add cost or complexity without adding value (Lambda, API Gateway, S3, DynamoDB) are excluded. The AI inference itself is fully serverless via Bedrock.
+## Current architecture
 
----
+~~~text
+┌─────────────────────┐
+│ Browser             │
+└─────────┬───────────┘
+          │ HTTP / Streamlit session
+┌─────────▼─────────────────────────────────────────────────────┐
+│ mod_chatbot_frontend.py                                        │
+│ demo login · controls · upload UI · chat display · streaming   │
+│ chat_history (UI) · bedrock_history (API payload/context)      │
+└─────────┬─────────────────────────────────────────────────────┘
+          │ Python calls / in-memory content
+┌─────────▼─────────────────────────────────────────────────────┐
+│ services + utilities                                           │
+│ validators → routing/sanitisation                              │
+│ image service → checks/orientation/thumbnail                   │
+│ document service → checks/preview                              │
+│ Bedrock service → Converse message construction/streaming      │
+└─────────┬─────────────────────────────────────────────────────┘
+          │ boto3: bedrock-runtime Converse / ConverseStream
+┌─────────▼─────────────────────────────────────────────────────┐
+│ AWS: Amazon Bedrock Runtime → selected foundation model        │
+│ IAM → permission; STS + Bedrock control plane → diagnostics    │
+└───────────────────────────────────────────────────────────────┘
+~~~
 
-## 2. High-Level Architecture
+## Components
 
-```
-╔════════════════════════════════════════════════════════════════╗
-║                    USER (Browser)                              ║
-╚══════════════════════════╦═════════════════════════════════════╝
-                           ║  HTTP (port 8501)
-╔══════════════════════════╩═════════════════════════════════════╗
-║               PRESENTATION LAYER                               ║
-║          mod_chatbot_frontend.py  (Streamlit)                  ║
-║                                                                ║
-║  ┌─────────────┐  ┌──────────────┐  ┌───────────────────────┐ ║
-║  │  Sidebar    │  │  Chat area   │  │  Welcome / empty      │ ║
-║  │  Settings   │  │  History     │  │  state with prompts   │ ║
-║  │  File upload│  │  Streaming   │  │  Capability cards     │ ║
-║  │  Controls   │  │  bubbles     │  └───────────────────────┘ ║
-║  └─────────────┘  └──────────────┘                            ║
-╚══════════════════════════╦═════════════════════════════════════╝
-                           ║  Python function calls
-╔══════════════════════════╩═════════════════════════════════════╗
-║                  SERVICE LAYER                                 ║
-║                                                                ║
-║  ┌──────────────────────────────────────────────────────────┐  ║
-║  │  services/bedrock_service.py  (BedrockService)           │  ║
-║  │  · Builds Converse API message payloads                  │  ║
-║  │  · Manages conversation history (list of role/content)   │  ║
-║  │  · Calls converse_stream() — yields text chunks          │  ║
-║  │  · Auto-fallback: model ID → inference profile           │  ║
-║  └──────────────────────────────────────────────────────────┘  ║
-║                                                                ║
-║  ┌─────────────────────────┐  ┌─────────────────────────────┐  ║
-║  │ services/image_         │  │ services/document_          │  ║
-║  │ service.py              │  │ service.py                  │  ║
-║  │ · Extension check       │  │ · Extension check           │  ║
-║  │ · Size check (5 MB)     │  │ · Size check (4.5 MB)       │  ║
-║  │ · Magic byte check      │  │ · Magic byte check          │  ║
-║  │ · EXIF rotation fix     │  │ · PDF integrity check       │  ║
-║  │ · RGBA→RGB conversion   │  │ · pypdf text preview        │  ║
-║  │ · Thumbnail generation  │  │ · Page count extraction     │  ║
-║  └─────────────────────────┘  └─────────────────────────────┘  ║
-║                                                                ║
-║  ┌──────────────────────────────────────────────────────────┐  ║
-║  │  utils/validators.py                                     │  ║
-║  │  · validate_file_upload() dispatcher                     │  ║
-║  │  · sanitize_filename() — path traversal protection       │  ║
-║  │  · sanitize_user_input() — input length guard            │  ║
-║  │  · export_conversation_as_text()                         │  ║
-║  └──────────────────────────────────────────────────────────┘  ║
-╚══════════════════════════╦═════════════════════════════════════╝
-                           ║  boto3  converse_stream()
-╔══════════════════════════╩═════════════════════════════════════╗
-║                    AWS BEDROCK                                 ║
-║                                                                ║
-║  Model:   amazon.nova-pro-v1:0                                 ║
-║  API:     Converse / ConverseStream                            ║
-║  Region:  us-east-1                                            ║
-║  Fallback: us.amazon.nova-pro-v1:0 (cross-region profile)      ║
-╚════════════════════════════════════════════════════════════════╝
-```
+| Component | Responsibility | Key detail |
+| --- | --- | --- |
+| mod_chatbot_frontend.py | UI, session state, upload workflow, stream rendering. | Uses Streamlit session state; data disappears when the session/app restarts. |
+| BedrockService | Builds content blocks and calls Bedrock. | ConverseStream yields text deltas for the UI. |
+| ImageService | Validates image input and creates thumbnails. | JPEG/PNG/GIF/WebP; 5 MB limit. |
+| DocumentService | Validates documents and creates previews. | PDF/TXT/MD/HTML/CSV/DOC/DOCX/XLS/XLSX; 4.5 MB limit. |
+| validators.py | Upload routing, filename/input cleaning, export helper. | Sanitises filename/path components. |
+| Diagnostic script | Tests Python/AWS/Bedrock readiness. | Uses STS and Bedrock APIs outside normal chat flow. |
 
----
+## Request flows
 
-## 3. Layer Details
+### Text
 
-### 3.1 Presentation Layer — `mod_chatbot_frontend.py`
+~~~text
+Prompt → trim/cap input → prepare service with selected controls
+       → prior API history + text content block → ConverseStream
+       → Streamlit updates one placeholder per text delta
+       → completed turns recorded in display and API histories
+~~~
 
-**Technology:** Streamlit 1.35+
+The selected model, temperature, response limit, persona/custom system prompt, and language instruction are applied to the service.
 
-Streamlit reruns the entire script on every user interaction. The frontend manages two separate state objects:
+### Image and document
 
-| State key | Type | Purpose |
-|---|---|---|
-| `bedrock_history` | `list[dict]` | Raw Converse API message history sent to Bedrock |
-| `chat_history` | `list[dict]` | Display-only UI history (role, text, attachment metadata) |
-| `pending_image` | `ImageResult \| None` | Attached image waiting to be sent |
-| `pending_document` | `DocumentResult \| None` | Attached document waiting to be sent |
-| `bedrock_service` | `BedrockService \| None` | Cached service instance |
+~~~text
+Upload → extension/size/signature validation → UI preview → pending attachment
+Question + attachment bytes → Bedrock content block + question text → streamed answer
+~~~
 
-**Why two separate histories?**
-The Bedrock history stores raw API content blocks (including binary bytes) — these can be very large and are not suitable for re-rendering in the UI. The chat history stores lightweight display metadata only.
+Images receive thumbnail generation and EXIF orientation handling. PDFs/text files can receive a preview. The attachment source bytes—not only the preview—are passed to the model. This is **direct single-document Q&A**, not RAG: no chunks, embeddings, vector database, retrieval, or citation pipeline exists.
 
-**Streaming:** `st.empty()` is used as a placeholder that is updated on every chunk with a `▌` cursor appended, then replaced with the final text once streaming completes.
+### Other actions
 
----
+- **Summary:** makes a fresh summarisation request over a copied API history.
+- **Export:** creates a plain-text transcript from UI history in memory.
+- **Connection check:** sends a small non-streaming ping request; it can incur model usage.
 
-### 3.2 Service Layer — `services/`
+## State and data lifecycle
 
-**Design principle:** All services are UI-agnostic. No Streamlit imports. They can be called from a CLI, a test, or a different frontend without modification.
+| Data | Location | Lifetime | Persistent? |
+| --- | --- | --- | --- |
+| Controls and login flag | Streamlit session state | Browser session | No |
+| UI transcript | chat_history | Browser session | No |
+| Bedrock API context and attachment bytes | bedrock_history | Browser session | No |
+| Pending image/document | Session state | Until remove/send | No |
+| Downloaded transcript | User device | User-controlled | Not stored by app |
 
-#### `bedrock_service.py` — BedrockService
+This low-storage approach keeps the demo simple but prevents shared/recoverable/searchable conversations.
 
-The core orchestrator. Key methods:
+## Models and fallback
 
-- `stream_response()` — builds content blocks, calls `converse_stream()`, yields text chunks, updates history
-- `invoke_response()` — non-streaming wrapper (for testing)
-- `_build_content_blocks()` — constructs the Converse API content array:
-  ```
-  [image_block?, document_block?, text_block]
-  ```
-  Text always goes last — recommended ordering for Nova multimodal prompts.
-- `_resolve_model_id()` — returns current active model ID (switches to inference profile on first AccessDeniedException)
+| UI choice | Model ID |
+| --- | --- |
+| Amazon Nova Pro | amazon.nova-pro-v1:0 |
+| Amazon Nova Lite | amazon.nova-lite-v1:0 |
+| Claude 3.5 Sonnet | anthropic.claude-3-5-sonnet-20241022-v2:0 |
 
-**Credential chain (in order):**
-1. `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` environment variables
-2. `~/.aws/credentials` default profile
-3. EC2 IAM Instance Role (recommended for production)
+The service default is Nova Pro in us-east-1. If its initial call gets AccessDeniedException, it retries with us.amazon.nova-pro-v1:0, a Nova Pro cross-region inference profile. A production version should configure fallbacks per selected model and region so model substitution is always intentional.
 
-#### `document_service.py` — DocumentService
+## Security and cost
 
-Validates and prepares document files. Returns `DocumentResult` (success) or `DocumentValidationError` (failure).
+Current safeguards: default AWS credential chain (no credentials hard-coded in the service), filename sanitisation, upload size/extension/signature checks, and in-memory attachment processing.
 
-Validation pipeline:
-1. Empty file check
-2. Size check (≤ 4.5 MB per Bedrock limit)
-3. Extension allowlist check
-4. Magic byte / content integrity check (PDF: `%PDF` header; OOXML: `PK\x03\x04`)
-5. Text preview extraction via `pypdf` (optional)
+Production work still required: replace demo login with Cognito/OIDC, add TLS, least-privilege roles, Secrets Manager, WAF/rate limits, audit logging, retention rules, guardrails/content safety, prompt-injection defences, encrypted object storage/scanning, and data classification.
 
-#### `image_service.py` — ImageService
+The on-screen token/cost counter is an approximation based on character count. For operational cost control, capture Bedrock response usage metadata, model ID, latency, errors, request size, and tenant/user identifiers where appropriate.
 
-Validates and prepares image files. Returns `ImageResult` or `ImageValidationError`.
+## Production evolution
 
-Validation pipeline:
-1. Empty file check
-2. Size check (≤ 5 MB)
-3. Extension allowlist check
-4. Magic byte check (JPEG: `\xff\xd8\xff`; PNG: `\x89PNG`; GIF: `GIF89a`; WebP: `RIFF....WEBP`)
-5. Pillow processing: EXIF auto-rotation, RGBA→RGB for JPEG, 400×400 thumbnail
+~~~text
+Internet → CloudFront/WAF → ALB → ECS/Fargate (containerised Streamlit)
+                                      ├─ Cognito (identity)
+                                      ├─ Bedrock Runtime (inference)
+                                      ├─ S3 + scanning (uploads)
+                                      ├─ DynamoDB/Aurora (history and metadata)
+                                      ├─ Knowledge Base/vector store (RAG, if needed)
+                                      └─ CloudWatch + tracing (operations)
+~~~
 
----
+Use direct attachments for a small single-file question. Add RAG when the requirement becomes a large, durable, filterable document collection with retrieval and citations.
 
-### 3.3 AWS Bedrock — Converse API
+## Design trade-offs
 
-The **Converse API** provides a unified, model-agnostic interface for multi-turn conversations. It handles:
+| Decision | Why it fits now | Change when… |
+| --- | --- | --- |
+| Streamlit monolith | Fast interactive prototype, small code surface. | APIs, high availability, or independent services are needed. |
+| Direct document bytes | Simple one-file Q&A; no retrieval failure. | Documents are many/large or require citations. |
+| Session memory | Low complexity and no app-managed persistence. | History, compliance, sharing, or scale is required. |
+| Bedrock managed models | No GPU/model-hosting operations. | Add routing/evaluations, not necessarily self-hosting. |
 
-- System prompts
-- Multi-turn message history
-- Multimodal content blocks (text, image, document)
-- Streaming via `ConverseStream`
-
-**Content block structure for a multimodal request:**
-```python
-{
-  "role": "user",
-  "content": [
-    {
-      "image": {
-        "format": "jpeg",
-        "source": {"bytes": <raw_image_bytes>}
-      }
-    },
-    {
-      "document": {
-        "format": "pdf",
-        "name": "my_document",
-        "source": {"bytes": <raw_pdf_bytes>}
-      }
-    },
-    {
-      "text": "What does this document say about the items in the image?"
-    }
-  ]
-}
-```
-
-**Why direct bytes instead of S3 URIs?**
-For files under 4.5 MB (documents) / 5 MB (images), sending raw bytes is simpler, cheaper, and requires no S3 bucket setup. S3 URI references are only beneficial for very large files or when files need to be reused across many requests.
-
----
-
-## 4. Data Flows
-
-### 4.1 Text-Only Conversation
-
-```
-User types message
-       ↓
-st.chat_input() captures text
-       ↓
-sanitize_user_input()
-       ↓
-BedrockService.stream_response(user_text, history)
-       ↓
-_build_content_blocks() → [{"text": "..."}]
-       ↓
-bedrock_runtime.converse_stream(modelId, messages, system, inferenceConfig)
-       ↓
-Stream events → yield text chunks → st.empty().markdown(chunk + "▌")
-       ↓
-Final render → history updated → session state saved
-```
-
-### 4.2 Image Analysis
-
-```
-User uploads image (sidebar file_uploader)
-       ↓
-ImageService.process(bytes, filename)
-  → extension check → size check → magic bytes → Pillow processing
-       ↓
-ImageResult stored in st.session_state.pending_image
-Thumbnail displayed in sidebar
-       ↓
-User types question → submit
-       ↓
-BedrockService.stream_response(
-    user_text,
-    history,
-    image_bytes=result.raw_bytes,
-    image_format=result.img_format
-)
-       ↓
-_build_content_blocks() → [image_block, text_block]
-       ↓
-converse_stream() → streaming response
-       ↓
-pending_image cleared → history updated
-```
-
-### 4.3 Document Q&A
-
-```
-User uploads PDF/DOCX/etc (sidebar file_uploader)
-       ↓
-DocumentService.process(bytes, filename)
-  → extension check → size check → magic bytes → pypdf preview
-       ↓
-DocumentResult stored in st.session_state.pending_document
-Preview text shown in sidebar expander
-       ↓
-User types question → submit
-       ↓
-BedrockService.stream_response(
-    user_text,
-    history,
-    doc_bytes=result.raw_bytes,
-    doc_name=result.display_name,
-    doc_format=result.doc_format
-)
-       ↓
-_build_content_blocks() → [document_block, text_block]
-       ↓
-converse_stream() → streaming response
-       ↓
-pending_document cleared → history updated
-```
-
----
-
-## 5. Memory and Context Management
-
-Conversation history is stored as a plain Python list in `st.session_state.bedrock_history`. Each turn appends two items:
-
-```python
-[
-  {"role": "user",      "content": [{"text": "What is AWS?"}]},
-  {"role": "assistant", "content": [{"text": "AWS is Amazon Web Services..."}]},
-  {"role": "user",      "content": [image_block, {"text": "What is in this image?"}]},
-  {"role": "assistant", "content": [{"text": "The image shows..."}]},
-]
-```
-
-The full history is sent to Bedrock on every request. Nova Pro's 300K token context window supports very long conversations before truncation becomes a concern.
-
-**Session scope:** History lives for the duration of the browser session. Closing the tab or clicking "New" resets it. For persistent history across sessions, DynamoDB would be the appropriate addition (noted as a future improvement).
-
----
-
-## 6. AWS Services — Decisions
-
-| Service | Decision | Reason |
-|---|---|---|
-| **Amazon Bedrock** | ✅ Used | Core AI inference — Nova Pro multimodal |
-| **AWS IAM** | ✅ Used | Credentials for Bedrock access |
-| **Amazon S3** | ❌ Not used | Files sent as bytes directly — no persistence needed |
-| **AWS Lambda** | ❌ Not used | Streamlit is long-running — Lambda's execution model is incompatible |
-| **API Gateway** | ❌ Not used | Streamlit handles its own HTTP server |
-| **DynamoDB** | ❌ Not used | Session-scoped memory is sufficient for demo/portfolio |
-| **Cognito** | ❌ Not used | No multi-user auth required for portfolio demo |
-| **CloudWatch** | ⚡ Optional | Python logging can be directed to CloudWatch via boto3 handler |
-
----
-
-## 7. Security Architecture
-
-| Concern | Mitigation |
-|---|---|
-| Credential exposure | No keys in source code; uses default credential chain |
-| Secret in Git | `.env` in `.gitignore`; `.env.example` has placeholders only |
-| Malicious file upload | Extension + magic byte validation in service layer |
-| Path traversal | `sanitize_filename()` strips path separators, normalises unicode |
-| Oversized uploads | Hard limits: 5 MB images, 4.5 MB documents |
-| Prompt injection | User input sanitised; model-level safety is Nova Pro's guardrails |
-| Broad IAM permissions | Minimum required: `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream` |
-
----
-
-## 8. Scalability Considerations
-
-The current architecture is appropriate for:
-- Personal portfolio demonstration
-- Single-user or low-concurrency usage
-- Interview showcases
-
-For production multi-user scale, the following additions would be needed:
-- **Load balancer** in front of multiple EC2 instances (or containerise with ECS)
-- **DynamoDB** for persistent, per-user conversation history
-- **S3** for large file storage (files > 4.5 MB, or shared across requests)
-- **Cognito** for user authentication and session isolation
-- **Bedrock Guardrails** for content filtering at scale
-- **CloudWatch** metrics and alarms for operational monitoring
+For a spoken walkthrough and interview Q&A, see [interview.md](interview.md).
